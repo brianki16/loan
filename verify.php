@@ -2,10 +2,20 @@
 session_start();
 
 // ========== DATABASE CONFIGURATION ==========
-$dbHost = 'localhost';
-$dbName = 'loan';
-$dbUser = 'root';
-$dbPass = '';
+$dbHost = getenv('DB_HOST');
+$dbPort = getenv('DB_PORT') ?: 3306;
+$dbName = getenv('DB_NAME');
+$dbUser = getenv('DB_USER');
+$dbPass = getenv('DB_PASS');
+
+$pdo = new PDO(
+    "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4",
+    $dbUser,
+    $dbPass,
+    [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    ]
+);
 // ============================================
 
 try {
