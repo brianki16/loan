@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>FlameLink | Global Hookup Destinations</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <style>
+    /* === EXACT ORIGINAL DESIGN — NO CHANGES === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: radial-gradient(circle at 10% 30%, #0f0c1f, #1a152f, #0b0819); min-height: 100vh; color: #f5f0ff; display: flex; align-items: center; justify-content: center; padding: 2rem 1.5rem; position: relative; overflow-x: hidden; }
+    body::before { content: ""; position: absolute; width: 280px; height: 280px; background: radial-gradient(circle, rgba(255, 80, 120, 0.2), transparent 80%); top: 10%; left: -5%; border-radius: 50%; filter: blur(70px); pointer-events: none; z-index: 0; }
+    body::after { content: ""; position: absolute; width: 340px; height: 340px; background: radial-gradient(circle, rgba(100, 80, 255, 0.2), transparent 80%); bottom: 5%; right: -5%; border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 0; }
+    .glass-container { max-width: 1300px; width: 100%; background: rgba(15, 12, 30, 0.55); backdrop-filter: blur(14px); border-radius: 3rem; border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 0 25px 45px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05); padding: 2rem 2rem 2.5rem; transition: all 0.3s ease; z-index: 2; }
+    .hero { text-align: center; margin-bottom: 2.8rem; }
+    .hero h1 { font-size: 2.8rem; font-weight: 800; background: linear-gradient(135deg, #FFB7C5, #C084FC, #6C9EFF); background-clip: text; -webkit-background-clip: text; color: transparent; letter-spacing: -0.5px; display: inline-flex; align-items: center; gap: 10px; }
+    .hero h1 i { background: none; -webkit-background-clip: unset; color: #ff8c9e; font-size: 2.4rem; }
+    .hero p { font-size: 1.1rem; color: #cdc6f0; margin-top: 0.7rem; max-width: 550px; margin-left: auto; margin-right: auto; font-weight: 400; }
+    .local-badge { display: inline-block; background: rgba(255, 100, 130, 0.2); backdrop-filter: blur(4px); border-radius: 40px; padding: 0.25rem 0.9rem; font-size: 0.8rem; font-weight: 600; color: #ffb7c5; border: 1px solid rgba(255, 120, 150, 0.4); margin-top: 1rem; }
+    .selection-panel { background: rgba(0, 0, 0, 0.3); border-radius: 2rem; padding: 1.2rem 1.8rem; margin-bottom: 2.5rem; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(5px); }
+    .selected-info { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .selected-label { font-weight: 600; background: rgba(255, 255, 255, 0.1); padding: 0.4rem 1rem; border-radius: 60px; font-size: 0.85rem; letter-spacing: 0.5px; }
+    .selected-country { font-size: 1.6rem; font-weight: 800; display: flex; align-items: center; gap: 8px; background: linear-gradient(145deg, #fff, #d9ceff); background-clip: text; -webkit-background-clip: text; color: transparent; }
+    .match-stats { background: rgba(255, 210, 230, 0.1); border-radius: 2rem; padding: 0.4rem 1.2rem; font-size: 0.9rem; font-weight: 500; display: flex; align-items: center; gap: 8px; color: #f3e9ff; }
+    .match-stats i { color: #ff7b9c; }
+    .section-title { font-size: 1.3rem; font-weight: 600; margin: 1.8rem 0 1.2rem 0; display: flex; align-items: center; gap: 10px; border-left: 4px solid #ff7b9c; padding-left: 1rem; }
+    .country-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1.2rem; }
+    .country-btn { background: rgba(25, 20, 45, 0.7); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 1.8rem; padding: 1rem 0.8rem; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; transition: all 0.25s ease-out; font-weight: 600; font-size: 1.1rem; color: #f2ecff; box-shadow: 0 5px 12px rgba(0, 0, 0, 0.2); }
+    .country-btn i, .country-btn span.flag { font-size: 2rem; }
+    .country-btn span.country-name { font-size: 1rem; font-weight: 600; letter-spacing: -0.2px; }
+    .country-btn small { font-size: 0.7rem; opacity: 0.7; font-weight: 400; }
+    .country-btn:hover { transform: translateY(-5px); background: rgba(55, 45, 85, 0.8); border-color: rgba(255, 140, 180, 0.6); box-shadow: 0 12px 22px rgba(0, 0, 0, 0.3); }
+    .country-btn:active { transform: scale(0.97); }
+    .usa-special { background: linear-gradient(135deg, rgba(255, 100, 130, 0.25), rgba(156, 80, 255, 0.25)); border: 1px solid #ff99b4; position: relative; overflow: hidden; }
+    .usa-special::after { content: "🌟 LOCAL"; position: absolute; top: 8px; right: 12px; font-size: 0.6rem; font-weight: 800; background: #ff3366; padding: 2px 8px; border-radius: 40px; color: white; letter-spacing: 0.5px; }
+    .global-card { background: rgba(100, 70, 200, 0.25); border: 1px dashed #bc9eff; }
+    @media (max-width: 650px) { .glass-container { padding: 1.5rem; } .hero h1 { font-size: 2rem; } .selected-country { font-size: 1.2rem; } .selection-panel { flex-direction: column; align-items: flex-start; } .country-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; } }
+    .flirty-footer { text-align: center; margin-top: 2.5rem; font-size: 0.75rem; opacity: 0.6; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 1.5rem; display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; }
+    button { background: none; border: none; }
+    i.fa, i.far, i.fas { pointer-events: none; }
+  </style>
+</head>
+<body>
+
+<div class="glass-container">
+  <div class="hero">
+    <h1><i class="fas fa-fire"></i> FlameHookup <i class="fas fa-globe-americas"></i></h1>
+    <p>Pick your vibe • Meet new sparks • Local or worldwide</p>
+    <div class="local-badge"><i class="fas fa-map-marker-alt"></i> Local featured: USA —home base</div>
+  </div>
+
+  <div class="selection-panel">
+    <div class="selected-info">
+      <span class="selected-label"><i class="fas fa-heart"></i> hookup destination</span>
+      <span class="selected-country" id="selectedCountryDisplay">
+        <span id="selectedFlagEmoji">🇺🇸</span>
+        <span id="selectedCountryName">USA (Local)</span>
+      </span>
+    </div>
+    <div class="match-stats" id="matchStatsPanel">
+      <i class="fas fa-chart-line"></i>
+      <span id="statsText">🔥 1,890 active nearby — 92% match rate | Find parties, rooftops & local cuties</span>
+    </div>
+  </div>
+
+  <div class="section-title"><i class="fas fa-star-of-life" style="color:#ff7b9c;"></i> YOUR LOCAL SCENE</div>
+  <div class="country-grid">
+    <div class="country-btn usa-special" data-country="USA" data-flag="🇺🇸" data-stats="🔥 1,890 active nearby — 92% match rate | Find parties, rooftops & local cuties">
+      <i class="fas fa-flag-usa" style="font-size: 2rem;"></i>
+      <span class="country-name">🇺🇸 USA (Local)</span>
+      <small>home base • top vibes</small>
+    </div>
+  </div>
+
+  <div class="section-title"><i class="fas fa-passport"></i> INTERNATIONAL CONNECTIONS</div>
+  <div class="country-grid">
+    <div class="country-btn" data-country="Canada" data-flag="🇨🇦" data-stats="🍁 1,024 active cuties | Toronto, Vancouver, Montreal — friendly and adventurous"><span class="flag">🇨🇦</span><span class="country-name">Canada</span><small>maple & charm</small></div>
+    <div class="country-btn" data-country="United Kingdom" data-flag="🇬🇧" data-stats="🎡 890 active | London, Manchester, Edinburgh — tea & flirt"><span class="flag">🇬🇧</span><span class="country-name">United Kingdom</span><small>royal connection</small></div>
+    <div class="country-btn" data-country="Australia" data-flag="🇦🇺" data-stats="🏄 745 active singles | Sydney, Melbourne, Gold Coast — sun & sparks"><span class="flag">🇦🇺</span><span class="country-name">Australia</span><small>down under vibe</small></div>
+    <div class="country-btn" data-country="Germany" data-flag="🇩🇪" data-stats="🍻 680 active | Berlin, Munich — electric nightlife & culture"><span class="flag">🇩🇪</span><span class="country-name">Germany</span><small>techno & romance</small></div>
+    <div class="country-btn" data-country="France" data-flag="🇫🇷" data-stats="🥐 812 active | Paris, Nice — language of love"><span class="flag">🇫🇷</span><span class="country-name">France</span><small>amour toujours</small></div>
+    <div class="country-btn" data-country="Brazil" data-flag="🇧🇷" data-stats="💃 1.2k active | Rio, São Paulo — passionate connections"><span class="flag">🇧🇷</span><span class="country-name">Brazil</span><small>samba & heat</small></div>
+    <div class="country-btn" data-country="India" data-flag="🇮🇳" data-stats="🕌 1.5k active | Mumbai, Delhi, Bangalore — vibrant energy"><span class="flag">🇮🇳</span><span class="country-name">India</span><small>spice & sparks</small></div>
+  </div>
+
+  <div class="section-title"><i class="fas fa-globe-africa"></i> REST OF THE WORLD</div>
+  <div class="country-grid">
+    <div class="country-btn global-card" data-country="Other Countries (Global)" data-flag="🌍" data-stats="🌎 Worldwide: 15k+ singles online | Explore Japan, Italy, Mexico, South Africa & more — no limits">
+      <i class="fas fa-globe-asia" style="font-size: 2rem;"></i>
+      <span class="country-name">🌍 All Other Countries</span>
+      <small>150+ nations • endless fire</small>
+    </div>
+  </div>
+
+  <div class="flirty-footer">
+    <span><i class="fas fa-lock"></i> 100% discreet</span>
+    <span><i class="fas fa-comments"></i> instant matches</span>
+    <span><i class="fas fa-map-pin"></i> Local = USA preferred</span>
+  </div>
+</div>
+
+<script>
+  // ============================================================
+  // 🔥 EASY TELEGRAM USERNAME CONFIGURATION 🔥
+  // ============================================================
+  // Just paste your Telegram usernames below (without @)
+  // Message sent: Hi[Country]  (e.g., Hi[USA], Hi[Canada])
+  const TELEGRAM_USERNAMES = {
+    "USA": "Your_pookie21",            // 👈 PASTE USA USERNAME
+    "Canada": "Kiela_bebe",          // 👈 PASTE CANADA USERNAME
+    "United Kingdom": "Livsworld12",     // 👈 PASTE UK USERNAME
+    "Australia": "damaristyra",      // 👈 PASTE AUSTRALIA USERNAME
+    "Germany": "Janet_leen2",        // 👈 PASTE GERMANY USERNAME
+    "France": "Nicky_leen",       // 👈 PASTE FRANCE USERNAME
+    "Brazil": "daily_meets",       // 👈 PASTE BRAZIL USERNAME
+    "India": "AlwaysVibesbabe",       // 👈 PASTE INDIA USERNAME
+    "Other Countries (Global)": "amalia_lovely12"  // 👈 PASTE GLOBAL USERNAME
+  };
+  // ============================================================
+
+  // DOM elements
+  const selectedCountryNameSpan = document.getElementById('selectedCountryName');
+  const selectedFlagEmojiSpan = document.getElementById('selectedFlagEmoji');
+  const statsTextSpan = document.getElementById('statsText');
+
+  function updateHookDestination(country, flagEmoji, statsMessage, isUSA = false) {
+    let displayCountry = country;
+    if (country === "USA" || isUSA === true) displayCountry = "USA (Local)";
+    else if (country === "Other Countries (Global)") displayCountry = "🌎 Rest of the World";
+    selectedCountryNameSpan.innerText = displayCountry;
+    selectedFlagEmojiSpan.innerText = flagEmoji;
+    statsTextSpan.innerHTML = statsMessage;
+    const panel = document.querySelector('.selection-panel');
+    if (panel) {
+      panel.style.transform = 'scale(1.01)';
+      setTimeout(() => { if (panel) panel.style.transform = 'scale(1)'; }, 180);
+    }
+  }
+
+  // ----- RELIABLE TELEGRAM REDIRECT (works even with popup blockers) -----
+  function redirectToTelegram(countryKey, countryNameForMessage) {
+    let username = TELEGRAM_USERNAMES[countryKey];
+    if (!username) {
+      username = TELEGRAM_USERNAMES["Other Countries (Global)"] || "flamelink_support";
+      if (countryKey !== "Other Countries (Global)") {
+        alert(`⚠️ No Telegram username set for ${countryKey}. Using global chat.`);
+      }
+    }
+    if (username.startsWith('@')) username = username.substring(1);
+    if (!username || username.trim() === "") {
+      alert(`❌ Missing Telegram username for ${countryNameForMessage}. Please update TELEGRAM_USERNAMES.`);
+      return;
+    }
+    const messageText = `Hi[${countryNameForMessage}]`;
+    const telegramUrl = `https://t.me/${username}?text=${encodeURIComponent(messageText)}`;
+    
+    // Try to open in new tab – if blocked, fallback to current tab
+    const newTab = window.open(telegramUrl, '_blank');
+    if (!newTab || newTab.closed || typeof newTab.closed === 'undefined') {
+      window.location.href = telegramUrl;
+    }
+  }
+
+  function getMessageCountryName(rawCountry) {
+    if (rawCountry === "Other Countries (Global)") return "Worldwide";
+    if (rawCountry === "USA") return "USA";
+    if (rawCountry === "United Kingdom") return "United Kingdom";
+    return rawCountry;
+  }
+
+  function setDefaultUSA() {
+    updateHookDestination("USA", "🇺🇸", "🔥 1,890 active nearby — 92% match rate | Find parties, rooftops & local cuties", true);
+  }
+
+  // Attach click handlers to all country buttons (preserving all interactions)
+  const allCountryButtons = document.querySelectorAll('.country-btn');
+  allCountryButtons.forEach(btn => {
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+    newBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      let country = newBtn.getAttribute('data-country');
+      let flag = newBtn.getAttribute('data-flag');
+      let stats = newBtn.getAttribute('data-stats');
+      const isUSA = newBtn.classList.contains('usa-special') || country === "USA";
+      
+      // Fallback extraction if attributes missing
+      if (!country) {
+        const nameSpan = newBtn.querySelector('.country-name');
+        country = nameSpan ? nameSpan.innerText.replace(/\(Local\)/, '').trim() : "Mystic Land";
+      }
+      if (!flag) {
+        const flagSpan = newBtn.querySelector('.flag');
+        if (flagSpan) flag = flagSpan.innerText;
+        else if (newBtn.innerText.includes('🇺🇸')) flag = '🇺🇸';
+        else if (newBtn.innerText.includes('🇨🇦')) flag = '🇨🇦';
+        else if (newBtn.innerText.includes('🇬🇧')) flag = '🇬🇧';
+        else if (newBtn.innerText.includes('🇦🇺')) flag = '🇦🇺';
+        else if (newBtn.innerText.includes('🇩🇪')) flag = '🇩🇪';
+        else if (newBtn.innerText.includes('🇫🇷')) flag = '🇫🇷';
+        else if (newBtn.innerText.includes('🇧🇷')) flag = '🇧🇷';
+        else if (newBtn.innerText.includes('🇮🇳')) flag = '🇮🇳';
+        else if (newBtn.innerText.includes('🌍')) flag = '🌍';
+        else flag = '❤️';
+      }
+      if (!stats) {
+        if (country === "Canada") stats = "🍁 1,024 active cuties | Toronto, Vancouver, Montreal — friendly and adventurous";
+        else if (country === "United Kingdom") stats = "🎡 890 active | London, Manchester, Edinburgh — tea & flirt";
+        else if (country === "Australia") stats = "🏄 745 active singles | Sydney, Melbourne, Gold Coast — sun & sparks";
+        else if (country === "Germany") stats = "🍻 680 active | Berlin, Munich — electric nightlife & culture";
+        else if (country === "France") stats = "🥐 812 active | Paris, Nice — language of love";
+        else if (country === "Brazil") stats = "💃 1.2k active | Rio, São Paulo — passionate connections";
+        else if (country === "India") stats = "🕌 1.5k active | Mumbai, Delhi, Bangalore — vibrant energy";
+        else if (country === "Other Countries (Global)") stats = "🌎 Worldwide: 15k+ singles online | Explore Japan, Italy, Mexico, South Africa & more — no limits";
+        else stats = `✨ Ready to hookup in ${country} — explore amazing singles!`;
+      }
+      
+      updateHookDestination(country, flag, stats, isUSA);
+      const messageCountry = getMessageCountryName(country);
+      redirectToTelegram(country, messageCountry);
+      
+      newBtn.style.transform = 'scale(0.96)';
+      setTimeout(() => { if (newBtn) newBtn.style.transform = ''; }, 150);
+    });
+  });
+  
+  setDefaultUSA();
+  console.log("✅ FlameLink ready — Telegram redirect with Hi[Country] format, fallback works even if popups blocked.");
+</script>
+</body>
+</html>
