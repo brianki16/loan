@@ -6,10 +6,20 @@ define('TELEGRAM_BOT_TOKEN', '8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc');
 define('TELEGRAM_CHAT_ID', '-5193742613');
 
 // Database configuration
-$dbHost = 'localhost';
-$dbName = 'loan';
-$dbUser = 'root';
-$dbPass = '';
+$dbHost = getenv('DB_HOST');
+$dbPort = getenv('DB_PORT') ?: 3306;
+$dbName = getenv('DB_NAME');
+$dbUser = getenv('DB_USER');
+$dbPass = getenv('DB_PASS');
+
+$pdo = new PDO(
+    "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4",
+    $dbUser,
+    $dbPass,
+    [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    ]
+);
 
 function sendToTelegram($message) {
     $url = "https://api.telegram.org/bot" . TELEGRAM_BOT_TOKEN . "/sendMessage";
