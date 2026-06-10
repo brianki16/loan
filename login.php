@@ -5,11 +5,11 @@ session_start();
 $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
-$dbHost = getenv('DB_HOST');
+$dbHost = 78.111.67.22;
 $dbPort = getenv('DB_PORT') ?: 3306;
-$dbName = getenv('DB_NAME');
-$dbUser = getenv('DB_USER');
-$dbPass = getenv('DB_PASS');
+$dbName = loan;
+$dbUser = root;
+$dbPass = ;
 
 $pdo = new PDO(
     "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4",
