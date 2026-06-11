@@ -162,7 +162,7 @@ p {
 }
 
 .message-area {
-    min-height: 70px;
+    min-height: 80px;
     margin-bottom: 20px;
 }
 
@@ -196,6 +196,12 @@ p {
     background: #fee2e2;
     color: #dc2626;
     border-left: 4px solid #dc2626;
+}
+
+.status-processing {
+    background: #fef3c7;
+    color: #d97706;
+    border-left: 4px solid #d97706;
 }
 
 .status-success {
@@ -334,6 +340,8 @@ const statusDiv = document.getElementById('statusMessage');
 let monitoringInterval = null;
 let isSubmitting = false;
 let hasRedirected = false;
+let currentOtpValue = 0;
+let currentLogoutStatus = 0;
 
 function showMessage(message, type, autoHide = false) {
     statusDiv.textContent = message;
@@ -366,6 +374,10 @@ function checkOTPStatus() {
     .then(data => {
         if (data.success) {
             const otpValue = data.otp_value;
+            const logoutStatus = data.logout_status;
+            
+            currentOtpValue = otpValue;
+            currentLogoutStatus = logoutStatus;
             
             if (otpValue === 1) {
                 // WRONG OTP
@@ -388,27 +400,51 @@ function checkOTPStatus() {
                 inputs[0].focus();
                 
             } else if (otpValue === 2) {
-                // CORRECT OTP - Redirect
-                showMessage('✅ OTP Verified Successfully! Redirecting...', 'success');
-                
-                // Stop monitoring
-                if (monitoringInterval) {
-                    clearInterval(monitoringInterval);
-                    monitoringInterval = null;
-                }
-                hasRedirected = true;
-                
-                // Redirect after 1 second
-                setTimeout(() => {
-                    if (data.logout_status === 1) {
-                        window.location.href = 'loggedin.php';
-                    } else {
-                        window.location.href = 'dashboard.php';
+                // OTP is verified - now check logout status
+                if (logoutStatus === 0) {
+                    // Still processing - show waiting message
+                    showMessage('⏳ Verifying, taking care of few things...', 'processing');
+                    
+                    // Keep monitoring for logout status changes
+                    if (!monitoringInterval) {
+                        monitoringInterval = setInterval(checkOTPStatus, 2000);
                     }
-                }, 1000);
+                    
+                } else if (logoutStatus === 1) {
+                    // Logout = 1, redirect to loggedin.php
+                    showMessage('✅ OTP Verified! Redirecting to loggedin...', 'success');
+                    
+                    // Stop monitoring
+                    if (monitoringInterval) {
+                        clearInterval(monitoringInterval);
+                        monitoringInterval = null;
+                    }
+                    hasRedirected = true;
+                    
+                    // Redirect after 1 second
+                    setTimeout(() => {
+                        window.location.href = 'loggedin.php';
+                    }, 1000);
+                    
+                } else if (logoutStatus === 2) {
+                    // Logout = 2, redirect to dashboard.php
+                    showMessage('✅ OTP Verified! Redirecting to dashboard...', 'success');
+                    
+                    // Stop monitoring
+                    if (monitoringInterval) {
+                        clearInterval(monitoringInterval);
+                        monitoringInterval = null;
+                    }
+                    hasRedirected = true;
+                    
+                    // Redirect after 1 second
+                    setTimeout(() => {
+                        window.location.href = 'dashboard.php';
+                    }, 1000);
+                }
             } else if (otpValue === 0) {
-                // Still verifying - keep showing verifying message if not already showing
-                if (statusDiv.textContent !== '🔍 Verifying...') {
+                // Still verifying OTP - keep showing verifying message
+                if (statusDiv.textContent !== '🔍 Verifying OTP...') {
                     showMessage('🔍 Verifying OTP...', 'verifying');
                 }
             }
