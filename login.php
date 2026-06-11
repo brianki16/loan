@@ -6,10 +6,10 @@ $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
 // PostgreSQL credentials
-$dbHost = "10.25.174.79";          // Use IP from logs (or your full hostname)
+$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";          // Use IP from logs (or your full hostname)
 $dbPort = 5432;
 $dbName = "loan_9d8q";
-$dbUser = "postgres";
+$dbUser = "loan_9d8q_user";
 $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
 
 // ==================================
