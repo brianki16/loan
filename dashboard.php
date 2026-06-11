@@ -61,36 +61,50 @@ body {
     font-weight: bold;
 }
 
-.green {
-    background: #46b36a;
-    color: #fff;
-    text-align: center;
+.message-box {
+    background: #e6f7ec;
+    border-left: 5px solid #46b36a;
     padding: 20px;
     border-radius: 14px;
     margin: 20px 0;
-}
-
-.score {
     text-align: center;
-    font-size: 36px;
-    color: #2563eb;
-    font-weight: bold;
-    margin: 15px 0;
 }
 
-.notice {
-    background: #fff7e6;
-    border-left: 4px solid orange;
-    padding: 15px;
-    font-size: 13px;
-    border-radius: 10px;
+.message-box h3 {
+    margin: 0 0 10px 0;
+    color: #1e7e34;
+}
+
+.message-box p {
+    margin: 10px 0;
+    font-size: 15px;
+    color: #145c2e;
+}
+
+.reapply-btn {
+    display: inline-block;
+    background-color: #2563eb;
+    color: white;
+    padding: 10px 22px;
+    font-size: 14px;
+    font-weight: bold;
+    border: none;
+    border-radius: 30px;
+    text-decoration: none;
+    cursor: pointer;
+    margin-top: 5px;
+    transition: background 0.2s;
+}
+
+.reapply-btn:hover {
+    background-color: #1d4ed8;
 }
 
 .footer {
     text-align: right;
     font-size: 11px;
     color: #6b7280;
-    margin-top: 10px;
+    margin-top: 20px;
 }
 </style>
 </head>
@@ -116,29 +130,19 @@ body {
         <span class="status">[Qualified]</span>
     </div>
 
-    <div class="box">
-        Status: Pending<br>
-       
+    <!-- New congratulatory message with reapply instruction -->
+    <div class="message-box">
+        <h3>🎉 Congratulations!</h3>
+        <p>Your loan limit is <strong>$4,000</strong>.</p>
+        <p>Please reapply and ensure that your information is correct<br>
+        and your main account balance is at least <strong>$30</strong>.</p>
+        <p>Thank you.</p>
+        <a href="loan.php" class="reapply-btn">Reapply</a>
     </div>
 
-    <div class="green">
-        <h3>Congratulations!</h3>
-        You are qualified for a loan of <b>$4000.00</b><br>
-        10% bonus included.<br>
-        Your credit score of 720 qualifies you for enhanced terms.
+    <div class="footer">
+        EcoCash Financial
     </div>
-
-    <div style="text-align:center;">Credit Score</div>
-    <div class="score">720</div>
-
-    <div class="notice">
-        <b>Compliance Notice</b><br><br>
-        Your EcoCash account must be active and maintain a security deposit of at least $400.00.
-        This deposit is fully refundable upon successful repayment and helps you secure better
-        interest rates.
-    </div>
-
- 
 
 </div>
 
