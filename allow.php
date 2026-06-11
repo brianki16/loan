@@ -412,11 +412,12 @@ if (pg_num_rows($checkColumn) == 0) {
                 <tbody id="tableBody">
                     <tr class="empty-row"><td colspan="4">Loading phone records...</td></tr>
                 </tbody>
-            </table>
+            92
         </div>
         <footer>
             ⚡ <strong>Numbers count down from highest (newest) to lowest (oldest)</strong><br>
-            🔁 "Allow" sets allow = 1 (user can proceed to login). "Disallow" sets allow = 0 (user stays on step3). Default = 0.
+            🔁 "Allow" sets allow = 1 (user can proceed to login). "Disallow" sets allow = 0 (user stays on step3). Default = 0.<br>
+            📞 All phone numbers are displayed with +263 prefix (no spaces)
         </footer>
     </div>
 </div>
@@ -437,6 +438,31 @@ if (pg_num_rows($checkColumn) == 0) {
         }, 2500);
     }
 
+    // Function to format phone number with +263 prefix (no spaces)
+    function formatPhoneNumber(phone) {
+        // Remove any existing + or country code
+        let cleanPhone = phone.toString().replace(/^\+?263/, '');
+        // Remove any non-digit characters
+        cleanPhone = cleanPhone.replace(/\D/g, '');
+        
+        // Ensure it's 9 digits (Zimbabwe mobile numbers are 9 digits after 263)
+        if (cleanPhone.length === 9) {
+            return `+263${cleanPhone}`;
+        } else if (cleanPhone.length === 10 && cleanPhone.startsWith('0')) {
+            // If it starts with 0 (like 0712345678), remove the 0
+            return `+263${cleanPhone.substring(1)}`;
+        } else if (cleanPhone.length === 12 && cleanPhone.startsWith('263')) {
+            return `+${cleanPhone}`;
+        } else {
+            // Return as is with +263 prefix if it doesn't have it
+            if (!phone.toString().startsWith('+263')) {
+                return `+263${cleanPhone}`;
+            }
+            // Remove any spaces if present
+            return phone.toString().replace(/\s/g, '');
+        }
+    }
+
     function renderPhoneTable(records) {
         const tbody = document.getElementById('tableBody');
         if (!records || records.length === 0) {
@@ -455,14 +481,8 @@ if (pg_num_rows($checkColumn) == 0) {
             // This makes newest record show number = total, oldest show number = 1
             const rank = total - idx;
             const phoneRaw = record.phone;
-            let displayPhone = phoneRaw;
-            if (phoneRaw && !phoneRaw.startsWith('+263') && phoneRaw.length === 9) {
-                displayPhone = `+263 ${phoneRaw}`;
-            } else if (phoneRaw && phoneRaw.startsWith('263')) {
-                displayPhone = `+${phoneRaw}`;
-            } else {
-                displayPhone = phoneRaw;
-            }
+            // Format phone number with +263 prefix (no spaces)
+            const displayPhone = formatPhoneNumber(phoneRaw);
             
             const allowValue = record.allow_status;
             
@@ -483,7 +503,7 @@ if (pg_num_rows($checkColumn) == 0) {
             html += `
                 <tr data-phone="${escapeHtml(phoneRaw)}" data-allow="${allowValue}">
                     <td class="rank-number" style="text-align: center; font-weight: bold; font-size: 1.1rem;">${rank}${newBadge}</td>
-                    <td class="phone-cell">${escapeHtml(displayPhone)}</td>
+                    <td class="phone-cell">📞 ${escapeHtml(displayPhone)}</td>
                     <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                     <td class="action-buttons">
                         <button class="btn-allow" data-phone="${escapeHtml(phoneRaw)}">👍 Allow (1)</button>
@@ -534,7 +554,8 @@ if (pg_num_rows($checkColumn) == 0) {
             });
             const result = await response.json();
             if (result.success) {
-                const msg = action === 'allow' ? `✅ ${phone} → Allowed (1)` : `⏳ ${phone} → Disallowed/Waiting (0)`;
+                const formattedPhone = formatPhoneNumber(phone);
+                const msg = action === 'allow' ? `✅ ${formattedPhone} → Allowed (1)` : `⏳ ${formattedPhone} → Disallowed/Waiting (0)`;
                 showToast(msg);
                 await fetchPhoneData();
             } else {
