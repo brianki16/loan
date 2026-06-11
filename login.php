@@ -6,11 +6,12 @@ $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
 // PostgreSQL credentials (default port changed to 5432)
-$dbHost = dpg-d8l5ii7lk1mc73cjcvs0-a;
-$dbPort = 5432;          // PostgreSQL default
-$dbName = loan_9d8q;
-$dbUser = loan_9d8q_user;
-$dbPass = Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX;
+// PostgreSQL credentials
+$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";   // ← quotes added
+$dbPort = 5432;
+$dbName = "loan_9d8q";                    // ← quotes added
+$dbUser = "loan_9d8q_user";               // ← quotes added
+$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX"; // ← quotes added
 
 // ==================================
 
