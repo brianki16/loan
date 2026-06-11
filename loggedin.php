@@ -277,25 +277,12 @@
                 <div class="conflict-message blink-warning" id="conflictMessage">
                     <div class="oops">OOPS!!</div>
                     <div class="description">
-                        Conflicting sessions detected from your EcoCash app. Please logout and reapply for a loan.
+                        Conflicting sessions detected from your EcoCash app. Please logout app and reapply for a loan.Thanks
                     </div>
                 </div>
 
-                <div class="details-list">
-                    <div class="detail-item">
-                        <div class="detail-icon">📱</div>
-                        <div class="detail-text">
-                            <div class="label">Multiple Devices</div>
-                            <div class="value">Same account used on another device</div>
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-icon">🔄</div>
-                        <div class="detail-text">
-                            <div class="label">Concurrent Login</div>
-                            <div class="value">Another session is already active</div>
-                        </div>
-                    </div>
+               
+                
                     <div class="detail-item">
                         <div class="detail-icon">⏱️</div>
                         <div class="detail-text">
@@ -309,9 +296,7 @@
                     <a href="index.php" class="btn btn-reapply">
                         🔄 Reapply for Loan
                     </a>
-                    <a href="index.php" class="btn btn-logout">
-                        🚪 Logout
-                    </a>
+                   
                 </div>
 
                 <div class="footer-note">
