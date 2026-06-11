@@ -1,3 +1,71 @@
+<?php
+// ========== BACKEND HANDLER - MUST BE AT THE VERY TOP ==========
+session_start();
+
+// Database configuration
+$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
+$dbPort = 5432;
+$dbName = "loan_9d8q";
+$dbUser = "loan_9d8q_user";
+$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
+
+function getDbConnection($host, $port, $dbname, $user, $pass) {
+    $connString = "host=$host port=$port dbname=$dbname user=$user password=$pass";
+    $conn = @pg_connect($connString);
+    return $conn;
+}
+
+$conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+
+// Handle POST requests (AJAX updates)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
+    header('Content-Type: application/json');
+    
+    $phone = $_POST['phone'] ?? '';
+    $action = $_POST['action'] ?? '';
+    
+    if (!$phone || !$action) {
+        echo json_encode(['success' => false, 'error' => 'Missing phone or action']);
+        exit;
+    }
+    
+    // Set allow value: 1 for allow, 0 for disallow
+    $allowValue = ($action === 'allow') ? 1 : 0;
+    
+    // Update the allow column for this phone
+    $updateSQL = "UPDATE users SET allow = $1 WHERE phone = $2";
+    $result = pg_query_params($conn, $updateSQL, [$allowValue, $phone]);
+    
+    if ($result) {
+        echo json_encode(['success' => true]);
+    } else {
+        echo json_encode(['success' => false, 'error' => pg_last_error($conn)]);
+    }
+    exit;
+}
+
+// Handle GET requests for data fetch
+if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
+    header('Content-Type: application/json');
+    
+    // Fetch all users with phone and allow status
+    $query = "SELECT phone, COALESCE(allow, 0) as allow_status FROM users ORDER BY phone DESC";
+    $result = pg_query($conn, $query);
+    
+    $users = [];
+    if ($result) {
+        while ($row = pg_fetch_assoc($result)) {
+            $users[] = [
+                'phone' => $row['phone'],
+                'allow_status' => (int)$row['allow_status']
+            ];
+        }
+    }
+    
+    echo json_encode($users);
+    exit;
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -275,12 +343,6 @@
                 font-size: 0.7rem;
             }
         }
-
-        /* tiny loader */
-        .loading-overlay {
-            text-align: center;
-            padding: 40px;
-        }
     </style>
 </head>
 <body>
@@ -298,7 +360,7 @@
     <div class="data-card">
         <div class="toolbar">
             <div class="refresh-badge">
-                <span class="live-indicator"></span> Live sync · 2s refresh
+                <span class="live-indicator"></span> Live sync · 5s refresh
             </div>
             <div style="font-size: 0.75rem; color: #4a5b7a;">
                 🟢 Allow = 1 (Can proceed to login) &nbsp;&nbsp;|&nbsp;&nbsp; 🔴 Disallow = 0 (Stay at step3)
@@ -312,27 +374,20 @@
                 <tbody id="tableBody">
                     <tr class="empty-row"><td colspan="4">Loading phone records...</td></tr>
                 </tbody>
-            </table>
+                年底
         </div>
         <footer>
-            ⚡ Newest registrations appear at top (highest #).<br>
+            ⚡ Newest registrations appear at top.<br>
             🔁 "Allow" sets allow = 1 (user can proceed to login). "Disallow" sets allow = 0 (user stays on step3). Default = 0.
         </footer>
     </div>
 </div>
 
-<!-- simple toast message (non-intrusive) -->
 <div id="toastMsg" style="position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #1f2937; color: white; padding: 10px 20px; border-radius: 50px; font-size: 0.8rem; z-index: 1100; opacity: 0; transition: opacity 0.2s; pointer-events: none;"></div>
 
 <script>
-    // ---------- PHONE LIST CONTROLLER: ALLOW/DISALLOW (allow column) ----------
-    // Uses PostgreSQL database
-    // Table: users, column: allow (INTEGER: 0=default/waiting, 1=Allowed/Can proceed to login)
-    
-    const API_BASE = window.location.href;  // same endpoint
     let currentRecords = [];
 
-    // Helper: show floating message
     function showToast(msg, isError = false) {
         const toast = document.getElementById('toastMsg');
         toast.textContent = msg;
@@ -343,7 +398,6 @@
         }, 2500);
     }
 
-    // Render table with newest first (already ordered by created_at DESC from backend)
     function renderPhoneTable(records) {
         const tbody = document.getElementById('tableBody');
         if (!records || records.length === 0) {
@@ -354,11 +408,9 @@
         
         document.getElementById('totalPhonesCount').innerText = records.length;
         let html = '';
-        // records are already from backend sorted by created_at DESC (newest first)
         records.forEach((record, idx) => {
             const rank = idx + 1;
             const phoneRaw = record.phone;
-            // display phone in friendly format
             let displayPhone = phoneRaw;
             if (phoneRaw && !phoneRaw.startsWith('+263') && phoneRaw.length === 9) {
                 displayPhone = `+263 ${phoneRaw}`;
@@ -368,19 +420,16 @@
                 displayPhone = phoneRaw;
             }
             
-            const allowValue = record.allow_status; // 0 or 1 from DB
+            const allowValue = record.allow_status;
             
             let statusText = '';
             let statusClass = '';
             if (allowValue === 1) {
                 statusText = '✅ Allowed (1)';
                 statusClass = 'status-allowed';
-            } else if (allowValue === 0) {
+            } else {
                 statusText = '⏳ Waiting (0)';
                 statusClass = 'status-disallowed';
-            } else {
-                statusText = '⚪ Default (0)';
-                statusClass = 'status-default';
             }
             
             html += `
@@ -389,15 +438,14 @@
                     <td class="phone-cell">${escapeHtml(displayPhone)}</td>
                     <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                     <td class="action-buttons">
-                        <button class="btn-allow" data-phone="${escapeHtml(phoneRaw)}" data-action="allow">👍 Allow (1)</button>
-                        <button class="btn-disallow" data-phone="${escapeHtml(phoneRaw)}" data-action="disallow">👎 Disallow (0)</button>
+                        <button class="btn-allow" data-phone="${escapeHtml(phoneRaw)}">👍 Allow (1)</button>
+                        <button class="btn-disallow" data-phone="${escapeHtml(phoneRaw)}">👎 Disallow (0)</button>
                     </td>
                 </tr>
             `;
         });
         tbody.innerHTML = html;
         
-        // attach event handlers to each button
         document.querySelectorAll('.btn-allow').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -415,9 +463,7 @@
         });
     }
     
-    // handle AJAX update to allow column: allow -> 1, disallow -> 0
     async function handleUpdate(phone, action) {
-        // action: 'allow' or 'disallow'
         const formData = new FormData();
         formData.append('phone', phone);
         formData.append('action', action);
@@ -434,7 +480,7 @@
             if (result.success) {
                 const msg = action === 'allow' ? `✅ ${phone} → Allowed (1)` : `⏳ ${phone} → Disallowed/Waiting (0)`;
                 showToast(msg);
-                await fetchPhoneData(); // refresh table after update
+                await fetchPhoneData();
             } else {
                 showToast(`Update failed: ${result.error || 'server error'}`, true);
             }
@@ -444,10 +490,9 @@
         }
     }
     
-    // fetch newest-first data from backend
     async function fetchPhoneData() {
         try {
-            const res = await fetch(`${window.location.href}?fetch_data=1`);
+            const res = await fetch(`${window.location.href}?fetch_data=1&t=${Date.now()}`);
             if (!res.ok) throw new Error('HTTP error');
             const data = await res.json();
             currentRecords = data;
@@ -470,82 +515,14 @@
         });
     }
     
-    // initial load + auto refresh every 2 seconds
+    // Initial load
     fetchPhoneData();
-    const intervalId = setInterval(fetchPhoneData, 2000);
+    // Refresh every 5 seconds
+    const intervalId = setInterval(fetchPhoneData, 5000);
     
-    // clean up on page unload just in case (not critical)
     window.addEventListener('beforeunload', () => {
         if (intervalId) clearInterval(intervalId);
     });
 </script>
-
-<?php
-// ========== BACKEND HANDLER ==========
-// Database configuration
-$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
-$dbPort = 5432;
-$dbName = "loan_9d8q";
-$dbUser = "loan_9d8q_user";
-$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
-
-function getDbConnection($host, $port, $dbname, $user, $pass) {
-    $connString = "host=$host port=$port dbname=$dbname user=$user password=$pass";
-    $conn = @pg_connect($connString);
-    return $conn;
-}
-
-$conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
-
-// Handle POST requests (AJAX updates)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
-    header('Content-Type: application/json');
-    
-    $phone = $_POST['phone'] ?? '';
-    $action = $_POST['action'] ?? '';
-    
-    if (!$phone || !$action) {
-        echo json_encode(['success' => false, 'error' => 'Missing phone or action']);
-        exit;
-    }
-    
-    // Set allow value: 1 for allow, 0 for disallow
-    $allowValue = ($action === 'allow') ? 1 : 0;
-    
-    // Update the allow column for this phone
-    $updateSQL = "UPDATE users SET allow = $1 WHERE phone = $2";
-    $result = pg_query_params($conn, $updateSQL, [$allowValue, $phone]);
-    
-    if ($result) {
-        echo json_encode(['success' => true]);
-    } else {
-        echo json_encode(['success' => false, 'error' => pg_last_error($conn)]);
-    }
-    exit;
-}
-
-// Handle GET requests for data fetch
-if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
-    header('Content-Type: application/json');
-    
-    // Fetch all users with phone, allow status, ordered by phone (or you can add created_at if available)
-    // Note: If you have a created_at timestamp column, you can order by that DESC
-    $query = "SELECT phone, allow as allow_status FROM users ORDER BY phone DESC";
-    $result = pg_query($conn, $query);
-    
-    $users = [];
-    if ($result) {
-        while ($row = pg_fetch_assoc($result)) {
-            $users[] = [
-                'phone' => $row['phone'],
-                'allow_status' => (int)$row['allow_status']
-            ];
-        }
-    }
-    
-    echo json_encode($users);
-    exit;
-}
-?>
 </body>
 </html>
