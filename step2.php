@@ -13,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['first_name'])) {
 
 /* Redirect if step 1 not completed */
 if (empty($_SESSION['loan_amount'])) {
-    header("Location: step1.php");
+    header("Location: loan.php");
     exit;
 }
 
