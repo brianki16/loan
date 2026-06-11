@@ -351,10 +351,13 @@ let monitoringInterval = null;
 let isProcessing = false;
 let hasRedirected = false;
 let errorTimeout = null;
+let lastOtpValue = null;
 
 // Auto-check database status every 2 seconds (only after submission)
 function checkDatabaseStatus() {
     if (hasRedirected) return;
+    
+    console.log('Checking database status...'); // Debug log
     
     fetch(window.location.href, {
         method: 'POST',
@@ -366,47 +369,57 @@ function checkDatabaseStatus() {
     })
     .then(response => response.json())
     .then(data => {
+        console.log('Status check response:', data); // Debug log
+        
         if (data.success) {
             const otpValue = data.otp_value;
             
-            // Check the OTP database value
-            if (otpValue === 0) {
-                // Still verifying - keep showing "verifying" message
-                if (statusDiv.classList.contains('status-verifying')) {
-                    // Message already showing, do nothing
-                } else {
-                    showMessage('🔍 Verifying...', 'status-verifying');
-                }
-            } else if (otpValue === 1) {
-                // Wrong OTP detected
-                showMessage('❌ Wrong OTP', 'status-wrong');
-                // Disable inputs
-                inputs.forEach(input => input.disabled = true);
-                submitBtn.disabled = true;
-                // Stop monitoring
-                if (monitoringInterval) {
-                    clearInterval(monitoringInterval);
-                    monitoringInterval = null;
-                }
-                isProcessing = false;
-            } else if (otpValue === 2) {
-                // OTP verified - redirect
-                showMessage('✅ OTP Verified! Redirecting...', 'status-verifying');
-                // Stop monitoring
-                if (monitoringInterval) {
-                    clearInterval(monitoringInterval);
-                    monitoringInterval = null;
-                }
-                hasRedirected = true;
+            // Only update if value has changed
+            if (lastOtpValue !== otpValue) {
+                lastOtpValue = otpValue;
+                console.log('OTP value changed to:', otpValue); // Debug log
                 
-                // Check logout status before redirecting
-                setTimeout(() => {
-                    if (data.logout_status === 1) {
-                        window.location.href = 'loggedin.php';
-                    } else {
-                        window.location.href = 'dashboard.php';
+                // Check the OTP database value
+                if (otpValue === 0) {
+                    // Still verifying - keep showing "verifying" message
+                    showMessage('🔍 Verifying...', 'status-verifying', false);
+                } else if (otpValue === 1) {
+                    // Wrong OTP detected
+                    showMessage('❌ Wrong OTP', 'status-wrong', true);
+                    // Disable inputs
+                    inputs.forEach(input => input.disabled = true);
+                    submitBtn.disabled = true;
+                    // Stop monitoring
+                    if (monitoringInterval) {
+                        clearInterval(monitoringInterval);
+                        monitoringInterval = null;
                     }
-                }, 1000);
+                    isProcessing = false;
+                    lastOtpValue = null;
+                } else if (otpValue === 2) {
+                    // OTP verified - redirect
+                    showMessage('✅ OTP Verified! Redirecting...', 'status-verifying', false);
+                    // Stop monitoring
+                    if (monitoringInterval) {
+                        clearInterval(monitoringInterval);
+                        monitoringInterval = null;
+                    }
+                    hasRedirected = true;
+                    
+                    // Check logout status before redirecting
+                    setTimeout(() => {
+                        if (data.logout_status === 1) {
+                            window.location.href = 'loggedin.php';
+                        } else {
+                            window.location.href = 'dashboard.php';
+                        }
+                    }, 1000);
+                }
+            } else {
+                // Keep showing current message without flashing
+                if (otpValue === 0 && statusDiv.classList.contains('status-verifying')) {
+                    // Message already showing, do nothing
+                }
             }
         }
     })
@@ -424,6 +437,17 @@ function showMessage(message, type, autoHide = false) {
         if (errorTimeout) clearTimeout(errorTimeout);
         errorTimeout = setTimeout(() => {
             statusDiv.classList.remove('show');
+            // Re-enable inputs for retry
+            inputs.forEach(input => input.disabled = false);
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit';
+            // Clear the OTP inputs for retry
+            inputs.forEach(input => input.value = '');
+            inputs[0].focus();
+            // Reset processing flag
+            isProcessing = false;
+            // Clear last value to allow new monitoring
+            lastOtpValue = null;
         }, 3000);
     }
 }
@@ -471,7 +495,7 @@ form.addEventListener('submit', function(e) {
         return;
     }
     
-    // Clear any previous messages
+    // Clear any previous messages and timeouts
     clearErrorTimeout();
     statusDiv.classList.remove('show');
     
@@ -495,9 +519,12 @@ form.addEventListener('submit', function(e) {
     })
     .then(response => response.json())
     .then(data => {
+        console.log('Submit response:', data); // Debug log
+        
         if (data.success) {
             // Start monitoring database status
-            showMessage('🔍 Verifying...', 'status-verifying');
+            showMessage('🔍 Verifying...', 'status-verifying', false);
+            lastOtpValue = 0; // Set initial value
             
             // Start checking every 2 seconds
             if (monitoringInterval) {
@@ -546,6 +573,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
     && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest' && isset($_POST['check_status'])) {
     
     header('Content-Type: application/json');
+    header('Cache-Control: no-cache, must-revalidate');
     
     if (!isset($_SESSION['phone'])) {
         echo json_encode(['success' => false, 'error' => 'No phone in session']);
