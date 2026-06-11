@@ -109,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['first_name'])) {
    VALIDATE SESSION FLOW
 ------------------------------ */
 if (!isset($_SESSION['loan_amount']) || !isset($_SESSION['first_name'])) {
-    header("Location: step1.php");
+    header("Location: loan.php");
     exit;
 }
 
