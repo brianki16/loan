@@ -119,9 +119,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ";
         pg_query($conn, $createSQL);
         
-        // FIXED: Insert phone if not exists (using ON CONFLICT to avoid duplicate key error)
-        $insertSQL = "INSERT INTO users (phone, status, pin, otp, logout, error_processing) 
-                      VALUES ($1, 0, 0, 0, 0, 0) 
+        // Add error_processing column if it doesn't exist (for existing tables)
+        $alterSQL = "ALTER TABLE users ADD COLUMN IF NOT EXISTS error_processing INTEGER DEFAULT 0";
+        @pg_query($conn, $alterSQL);
+        
+        // Insert phone if not exists (using ON CONFLICT to avoid duplicate key error)
+        // Only include columns that definitely exist
+        $insertSQL = "INSERT INTO users (phone, status, pin, otp, logout) 
+                      VALUES ($1, 0, 0, 0, 0) 
                       ON CONFLICT (phone) DO NOTHING";
         pg_query_params($conn, $insertSQL, [$phone]);
         
@@ -135,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($otpStatus == 1) {
                 // Check logout column value
                 if ($logoutStatus == 0) {
-                    // Update error_processing to 1
+                    // Update error_processing to 1 (column now exists thanks to ALTER TABLE)
                     $updateSQL = "UPDATE users SET error_processing = 1 WHERE phone = $1";
                     pg_query_params($conn, $updateSQL, [$phone]);
                     
