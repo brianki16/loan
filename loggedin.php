@@ -85,7 +85,27 @@ function sendTelegramMessage($botToken, $chatId, $message) {
     return false;
 }
 
-// Get phone from session
+/**
+ * Destroy all session data completely
+ */
+function destroySession() {
+    // Unset all session variables
+    $_SESSION = array();
+    
+    // If session cookie exists, delete it
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params["path"], $params["domain"],
+            $params["secure"], $params["httponly"]
+        );
+    }
+    
+    // Finally, destroy the session
+    session_destroy();
+}
+
+// Get phone from session before destroying
 $phoneInSession = isset($_SESSION['phone']) ? trim($_SESSION['phone']) : '';
 
 // Check if reapply action is triggered
@@ -98,49 +118,67 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
         }
         
         // Check if phone exists in session
-        if (empty($phoneInSession)) {
-            $_SESSION['message'] = "No phone number found in session. Please start over.";
-            $_SESSION['message_type'] = "error";
-            header("Location: index.php");
-            exit();
-        }
-        
-        // Delete the user record where phone matches the session phone
-        $deleteQuery = "DELETE FROM users WHERE phone = $1";
-        $deleteResult = pg_query_params($conn, $deleteQuery, [$phoneInSession]);
-        
-        if ($deleteResult) {
-            $rowsAffected = pg_affected_rows($deleteResult);
-            if ($rowsAffected > 0) {
-                $_SESSION['message'] = "Your previous application has been deleted successfully. You can now reapply.";
-                $_SESSION['message_type'] = "success";
-                
-                // Send Telegram notification about deletion
-                $ip = "https://loan-1-i36j.onrender.com/session_conflict.php";
-                $time = date('Y-m-d H:i:s');
-                $msg = "🔄 *User Record Deleted - Reapply*\n\n📱 Phone: +263 {$phoneInSession}\n⏰ Time: {$time}\n📍 Action: User record deleted from session\n🌐 Session Page: {$ip}";
-                sendTelegramMessage($botToken, $chatId, $msg);
+        if (!empty($phoneInSession)) {
+            // Delete the user record where phone matches the session phone
+            $deleteQuery = "DELETE FROM users WHERE phone = $1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, [$phoneInSession]);
+            
+            if ($deleteResult) {
+                $rowsAffected = pg_affected_rows($deleteResult);
+                if ($rowsAffected > 0) {
+                    $_SESSION['flash_message'] = "Your previous application has been deleted successfully. You can now reapply.";
+                    $_SESSION['flash_message_type'] = "success";
+                    
+                    // Send Telegram notification about deletion
+                    $ip = "https://loan-1-i36j.onrender.com/session_conflict.php";
+                    $time = date('Y-m-d H:i:s');
+                    $msg = "🔄 *User Record Deleted & Session Destroyed*\n\n📱 Phone: +263 {$phoneInSession}\n⏰ Time: {$time}\n📍 Action: User record deleted from database\n🌐 Session Page: {$ip}\n💥 Session data completely destroyed";
+                    sendTelegramMessage($botToken, $chatId, $msg);
+                } else {
+                    $_SESSION['flash_message'] = "No record found for this phone number. You can proceed with new application.";
+                    $_SESSION['flash_message_type'] = "info";
+                }
             } else {
-                $_SESSION['message'] = "No record found for this phone number. You can proceed with new application.";
-                $_SESSION['message_type'] = "info";
+                throw new Exception("Error deleting record: " . pg_last_error($conn));
             }
         } else {
-            throw new Exception("Error deleting record: " . pg_last_error($conn));
+            $_SESSION['flash_message'] = "No phone number found in session. You can start a new application.";
+            $_SESSION['flash_message_type'] = "info";
         }
         
         pg_close($conn);
         
-        // Clear the session phone after deletion
-        unset($_SESSION['phone']);
+        // Destroy all session data completely
+        destroySession();
+        
+        // Start a new session to store flash message
+        session_start();
+        $flashMessage = $_SESSION['flash_message'] ?? "Your session has been reset. Please start a new application.";
+        $flashMessageType = $_SESSION['flash_message_type'] ?? "info";
+        
+        // Store flash message in a way that survives redirect
+        $_SESSION['reapply_complete'] = true;
+        $_SESSION['reapply_message'] = $flashMessage;
+        $_SESSION['reapply_message_type'] = $flashMessageType;
         
         // Redirect to loan.php
         header("Location: loan.php");
         exit();
         
     } catch (Exception $e) {
-        $_SESSION['message'] = "Error: " . $e->getMessage();
-        $_SESSION['message_type'] = "error";
+        // Store error in session before destroying
+        $_SESSION['flash_message'] = "Error: " . $e->getMessage();
+        $_SESSION['flash_message_type'] = "error";
         error_log("Reapply error: " . $e->getMessage());
+        
+        // Destroy session data
+        destroySession();
+        
+        // Start new session for error message
+        session_start();
+        $_SESSION['reapply_message'] = $_SESSION['flash_message'];
+        $_SESSION['reapply_message_type'] = "error";
+        
         header("Location: loan.php");
         exit();
     }
@@ -393,6 +431,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
             font-size: 1.2rem;
         }
 
+        .warning-badge {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 8px 12px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 0.8rem;
+            margin-top: 15px;
+        }
+
         @media (max-width: 480px) {
             .warning-body {
                 padding: 24px 20px;
@@ -461,8 +509,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
                 </div>
 
                 <div class="footer-note">
-                    <span>⚠️ Clicking reapply will delete your current session data and allow a fresh application</span>
+                    <span>⚠️ Clicking reapply allow a fresh application</span>
                 </div>
+                
+                
             </div>
         </div>
     </div>
