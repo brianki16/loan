@@ -1,11 +1,14 @@
-FROM php:8.3-apache
+# Use the official PHP 8.2 Apache image as the base
+FROM php:8.2-apache
 
-# Copy application files
-COPY . /var/www/html/
+# Update package lists and install the PostgreSQL client library (libpq-dev)
+RUN apt-get update && apt-get install -y libpq-dev
 
-# Enable Apache rewrite module
-RUN a2enmod rewrite
+# Install both the pdo_pgsql and pgsql PHP extensions
+RUN docker-php-ext-install pdo_pgsql pgsql
 
-EXPOSE 80
+# Enable the extensions in the PHP configuration
+RUN docker-php-ext-enable pdo_pgsql pgsql
 
-CMD ["apache2-foreground"]
+# Use the production-ready Apache configuration
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
