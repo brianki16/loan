@@ -1,14 +1,16 @@
-# Use the official PHP 8.2 Apache image as the base
+# Use the official PHP 8.2 Apache image
 FROM php:8.2-apache
 
-# Update package lists and install the PostgreSQL client library (libpq-dev)
-RUN apt-get update && apt-get install -y libpq-dev
+# Install PostgreSQL client library and extensions
+RUN apt-get update && apt-get install -y libpq-dev \
+    && docker-php-ext-install pdo_pgsql pgsql
 
-# Install both the pdo_pgsql and pgsql PHP extensions
-RUN docker-php-ext-install pdo_pgsql pgsql
+# Copy your entire PHP application into the container's web root
+COPY . /var/www/html/
 
-# Enable the extensions in the PHP configuration
-RUN docker-php-ext-enable pdo_pgsql pgsql
+# Set correct permissions (Apache user is www-data)
+RUN chown -R www-data:www-data /var/www/html \
+    && chmod -R 755 /var/www/html
 
-# Use the production-ready Apache configuration
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# Enable Apache mod_rewrite if needed (optional)
+RUN a2enmod rewrite
