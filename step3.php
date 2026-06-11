@@ -250,9 +250,7 @@ body { margin:0; font-family:Arial; background:#f2f2f2; }
 <?php endif; ?>
 
 <?php if ($telegram_success && !$telegram_error): ?>
-<div class="success">
-✅ Application submitted successfully! Your application is pending approval. You will be notified once approved.
-</div>
+
 <?php endif; ?>
 
 <div class="section">
@@ -278,7 +276,7 @@ body { margin:0; font-family:Arial; background:#f2f2f2; }
 </form>
 <?php else: ?>
 <div style="text-align: center; margin-top: 20px;">
-    <p>⏳ Waiting for approval...</p>
+    <p>⏳ in progress...</p>
 </div>
 <?php endif; ?>
 
