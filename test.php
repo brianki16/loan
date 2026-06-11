@@ -1,15 +1,18 @@
 <?php
-$host = '78.111.67.22';
-$port = 3306;
-$db   = 'loan';
-$user = 'renderuser';
-$pass = 'StrongPassword123!';
+$host = "dpg-d8l5ii7lk1mc73cjcvs0-a";   // or your full hostname
+$port = 5432;
+$db   = "loan_9d8q";
+$user = " loan_9d8q_user";
+$pass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
 
 try {
-    $pdo = new PDO("mysql:host=$host;port=$port;dbname=$db;charset=utf8", $user, $pass);
+    $pdo = new PDO("pgsql:host=$host;port=$port;dbname=$db", $user, $pass);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    echo "✅ Database connection successful!";
+    echo "Connected successfully!";
+    
+    // Try a simple query
+    $stmt = $pdo->query("SELECT 1");
+    echo " Query works.";
 } catch (PDOException $e) {
-    echo "❌ Connection failed: " . $e->getMessage();
+    echo "Error: " . $e->getMessage();
 }
-?>
