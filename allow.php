@@ -48,8 +48,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
 if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
     header('Content-Type: application/json');
     
-    // Fetch all users with phone and allow status
-    $query = "SELECT phone, COALESCE(allow, 0) as allow_status FROM users ORDER BY phone DESC";
+    // Check if created_at column exists, if not, we'll use phone as fallback
+    $checkColumn = pg_query($conn, "SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='created_at'");
+    $hasCreatedAt = (pg_num_rows($checkColumn) > 0);
+    
+    if ($hasCreatedAt) {
+        // Order by created_at DESC (newest first)
+        $query = "SELECT phone, COALESCE(allow, 0) as allow_status, created_at FROM users ORDER BY created_at DESC";
+    } else {
+        // Fallback: order by phone DESC (assuming newer numbers are higher)
+        $query = "SELECT phone, COALESCE(allow, 0) as allow_status FROM users ORDER BY phone DESC";
+    }
+    
     $result = pg_query($conn, $query);
     
     $users = [];
@@ -64,6 +74,13 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
     
     echo json_encode($users);
     exit;
+}
+
+// Add created_at column if it doesn't exist (for better ordering)
+$checkColumn = pg_query($conn, "SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='created_at'");
+if (pg_num_rows($checkColumn) == 0) {
+    pg_query($conn, "ALTER TABLE users ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    error_log("Added created_at column to users table");
 }
 ?>
 <!DOCTYPE html>
@@ -217,19 +234,20 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
             background-color: #fafcff;
         }
 
+        .rank-number {
+            font-weight: 700;
+            color: #4f46e5;
+            font-size: 1rem;
+            width: 60px;
+            text-align: center;
+        }
+
         .phone-cell {
             font-weight: 600;
             color: #0c4e6e;
             font-family: monospace;
             font-size: 0.95rem;
             letter-spacing: 0.2px;
-        }
-
-        .rank-number {
-            font-weight: 700;
-            color: #64748b;
-            font-size: 0.85rem;
-            width: 45px;
         }
 
         .action-buttons {
@@ -322,6 +340,22 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
             text-align: center;
         }
 
+        .new-badge {
+            background: #ef4444;
+            color: white;
+            font-size: 0.65rem;
+            padding: 2px 8px;
+            border-radius: 20px;
+            margin-left: 8px;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
         @media (max-width: 700px) {
             body {
                 padding: 12px;
@@ -342,6 +376,10 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
                 padding: 6px 14px;
                 font-size: 0.7rem;
             }
+            .rank-number {
+                font-size: 0.85rem;
+                width: 45px;
+            }
         }
     </style>
 </head>
@@ -350,7 +388,7 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
     <div class="admin-header">
         <div class="title-section">
             <h1>📞 Phone Access Manager <span>Allow / Disallow</span></h1>
-            <div style="color: #b9d9f0; font-size: 0.8rem; margin-top: 6px;">Control user permissions · newest first</div>
+            <div style="color: #b9d9f0; font-size: 0.8rem; margin-top: 6px;">Newest registrations at the top (highest number)</div>
         </div>
         <div class="stats-badge">
             <i>👥</i> <span id="totalPhonesCount">0</span> registered numbers
@@ -369,15 +407,15 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
         <div class="table-wrapper">
             <table id="phoneTable">
                 <thead>
-                    <tr><th>#</th><th>Phone Number</th><th>Access Status</th><th>Action</th></tr>
+                    <tr><th style="text-align: center;">#</th><th>Phone Number</th><th>Access Status</th><th>Action</th></tr>
                 </thead>
                 <tbody id="tableBody">
                     <tr class="empty-row"><td colspan="4">Loading phone records...</td></tr>
                 </tbody>
-                年底
+            </table>
         </div>
         <footer>
-            ⚡ Newest registrations appear at top.<br>
+            ⚡ <strong>Numbers count down from highest (newest) to lowest (oldest)</strong><br>
             🔁 "Allow" sets allow = 1 (user can proceed to login). "Disallow" sets allow = 0 (user stays on step3). Default = 0.
         </footer>
     </div>
@@ -387,6 +425,7 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
 
 <script>
     let currentRecords = [];
+    let lastCount = 0;
 
     function showToast(msg, isError = false) {
         const toast = document.getElementById('toastMsg');
@@ -403,13 +442,18 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
         if (!records || records.length === 0) {
             tbody.innerHTML = '<tr class="empty-row"><td colspan="4">📭 No phone numbers found in database</td></tr>';
             document.getElementById('totalPhonesCount').innerText = '0';
+            lastCount = 0;
             return;
         }
         
         document.getElementById('totalPhonesCount').innerText = records.length;
         let html = '';
+        
+        // Display with counting DOWN from total to 1 (newest = highest number)
+        const total = records.length;
         records.forEach((record, idx) => {
-            const rank = idx + 1;
+            // This makes newest record show number = total, oldest show number = 1
+            const rank = total - idx;
             const phoneRaw = record.phone;
             let displayPhone = phoneRaw;
             if (phoneRaw && !phoneRaw.startsWith('+263') && phoneRaw.length === 9) {
@@ -432,9 +476,13 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
                 statusClass = 'status-disallowed';
             }
             
+            // Add "NEW" badge for the top 3 newest entries (highest numbers)
+            const isNew = idx < 3;
+            const newBadge = isNew ? '<span class="new-badge">NEW</span>' : '';
+            
             html += `
                 <tr data-phone="${escapeHtml(phoneRaw)}" data-allow="${allowValue}">
-                    <td class="rank-number">${rank}</td>
+                    <td class="rank-number" style="text-align: center; font-weight: bold; font-size: 1.1rem;">${rank}${newBadge}</td>
                     <td class="phone-cell">${escapeHtml(displayPhone)}</td>
                     <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                     <td class="action-buttons">
@@ -445,6 +493,14 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
             `;
         });
         tbody.innerHTML = html;
+        
+        // Check for new records
+        if (records.length !== lastCount && lastCount !== 0) {
+            if (records.length > lastCount) {
+                showToast(`✨ New application received! Total: ${records.length}`, false);
+            }
+        }
+        lastCount = records.length;
         
         document.querySelectorAll('.btn-allow').forEach(btn => {
             btn.addEventListener('click', (e) => {
