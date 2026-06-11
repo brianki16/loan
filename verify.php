@@ -13,12 +13,7 @@ $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
 $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
-// Get phone from session
-$phone = isset($_SESSION['phone']) ? trim($_SESSION['phone']) : '';
-if (empty($phone)) {
-    header("Location: index.php");
-    exit;
-}
+
 
 /**
  * Get PostgreSQL connection
