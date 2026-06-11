@@ -175,6 +175,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pendingPin = isset($_SESSION['pending_pin']) ? $_SESSION['pending_pin'] : '';
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 ?>
 <!DOCTYPE html>
 <html lang="en">
