@@ -69,7 +69,7 @@ function sendTelegramMessage($botToken, $chatId, $message) {
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CLLEXOPT_POSTFIELDS => http_build_query($postData),
+            CURLOPT_POSTFIELDS => http_build_query($postData),  // Fixed typo
             CURLOPT_TIMEOUT => 10,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_USERAGENT => 'EcoCashBot/1.0'
