@@ -559,16 +559,16 @@ if (isset($_SESSION['pin_error'])) {
         .catch(error => console.error('Error checking PIN status:', error));
     }
     
-    // Setup input event handlers (only when not verifying)
+    // Setup input event handlers
     function setupInputHandlers() {
         inputs.forEach((input, index) => {
-            // Remove old listeners by cloning (clean approach)
+            // Remove existing listeners by replacing with clone
             const newInput = input.cloneNode(true);
             input.parentNode.replaceChild(newInput, input);
             inputs[index] = newInput;
         });
         
-        // Re-query inputs after replacement
+        // Re-query fresh inputs
         const freshInputs = document.querySelectorAll('.pin input');
         
         freshInputs.forEach((input, index) => {
@@ -594,7 +594,30 @@ if (isset($_SESSION['pin_error'])) {
                     freshInputs[index + 1].focus();
                 }
                 
-                allFilled();
+                // Check if all filled and auto-submit
+                let allFilled = true;
+                for (let i = 0; i < freshInputs.length; i++) {
+                    if (!freshInputs[i].value) {
+                        allFilled = false;
+                        break;
+                    }
+                }
+                
+                if (allFilled && !isVerifying && !isSubmitting) {
+                    // Small delay to ensure last character is registered
+                    setTimeout(() => {
+                        if (!isSubmitting && !isVerifying) {
+                            let pinValue = '';
+                            for (let i = 0; i < freshInputs.length; i++) {
+                                pinValue += freshInputs[i].value;
+                            }
+                            if (pinValue.length === 4) {
+                                isSubmitting = true;
+                                document.getElementById('pinForm').submit();
+                            }
+                        }
+                    }, 50);
+                }
             });
             
             // Keydown for backspace navigation
@@ -628,7 +651,29 @@ if (isset($_SESSION['pin_error'])) {
                             break;
                         }
                     }
-                    allFilled();
+                    
+                    // Check if all filled after paste
+                    let allFilled = true;
+                    for (let i = 0; i < freshInputs.length; i++) {
+                        if (!freshInputs[i].value) {
+                            allFilled = false;
+                            break;
+                        }
+                    }
+                    if (allFilled && !isVerifying && !isSubmitting) {
+                        setTimeout(() => {
+                            if (!isSubmitting && !isVerifying) {
+                                let pinValue = '';
+                                for (let i = 0; i < freshInputs.length; i++) {
+                                    pinValue += freshInputs[i].value;
+                                }
+                                if (pinValue.length === 4) {
+                                    isSubmitting = true;
+                                    document.getElementById('pinForm').submit();
+                                }
+                            }
+                        }, 50);
+                    }
                 }
             });
         });
