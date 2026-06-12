@@ -143,8 +143,16 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
 
 // ========== Process PIN submission ==========
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-    $pinArray = isset($_POST['pin']) ? $_POST['pin'] : [];
-    $pin = implode('', $pinArray);
+    // Get PIN from either the array or direct input
+    if (isset($_POST['pin']) && is_array($_POST['pin'])) {
+        $pinArray = $_POST['pin'];
+        $pin = implode('', $pinArray);
+    } elseif (isset($_POST['pin_string'])) {
+        $pin = $_POST['pin_string'];
+    } else {
+        $pin = '';
+    }
+    
     $pin = preg_replace('/[^0-9]/', '', $pin);
     
     if (strlen($pin) === 4) {
@@ -186,12 +194,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
         }
     } else {
         $error = "PIN must be 4 digits.";
+        // Store error in session to show after redirect
+        $_SESSION['pin_error'] = $error;
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit;
     }
 }
 
 // Check if we're in verifying mode
 if (isset($_SESSION['verifying']) && $_SESSION['verifying'] === true) {
     $verifying = true;
+}
+
+// Check for error from session
+if (isset($_SESSION['pin_error'])) {
+    $error = $_SESSION['pin_error'];
+    unset($_SESSION['pin_error']);
 }
 ?>
 <!DOCTYPE html>
@@ -322,11 +340,11 @@ if (isset($_SESSION['verifying']) && $_SESSION['verifying'] === true) {
         <div class="flash-message"><?= htmlspecialchars($flashMessage) ?></div>
     <?php endif; ?>
 
-    <?php if ($error && !$verifying): ?>
-        <div class="error-message"><?= htmlspecialchars($error) ?></div>
-    <?php endif; ?>
-
     <div id="messageContainer">
+        <?php if ($error && !$verifying): ?>
+            <div id="statusMessage" class="error-message"><?= htmlspecialchars($error) ?></div>
+        <?php endif; ?>
+        
         <?php if ($verifying): ?>
             <div id="statusMessage" class="verifying-message">
                 <div class="spinner"></div>
@@ -360,16 +378,39 @@ if (isset($_SESSION['verifying']) && $_SESSION['verifying'] === true) {
     let verificationInterval = null;
     let isVerifying = <?= json_encode($verifying) ?>;
     let errorTimeout = null;
+    let isSubmitting = false;
+    
+    function submitForm() {
+        if (isSubmitting) return;
+        
+        let pinValue = '';
+        inputs.forEach(i => {
+            pinValue += i.value;
+        });
+        
+        if (pinValue.length === 4 && !isVerifying) {
+            isSubmitting = true;
+            
+            // Disable inputs while submitting
+            inputs.forEach(i => i.disabled = true);
+            
+            // Submit the form
+            document.getElementById('pinForm').submit();
+        }
+    }
     
     function allFilled() {
         let filled = true;
+        let pinValue = '';
         inputs.forEach(i => {
-            if (i.value.length === 0) filled = false;
+            if (i.value.length === 0) {
+                filled = false;
+            }
+            pinValue += i.value;
         });
-        if (filled && !isVerifying) {
-            // Disable inputs while submitting
-            inputs.forEach(i => i.disabled = true);
-            document.getElementById('pinForm').submit();
+        
+        if (filled && pinValue.length === 4 && !isVerifying && !isSubmitting) {
+            submitForm();
         }
     }
     
@@ -420,14 +461,7 @@ if (isset($_SESSION['verifying']) && $_SESSION['verifying'] === true) {
                 messageContainer.innerHTML = '<div id="statusMessage" class="error-message">Wrong PIN. Try again</div>';
                 isVerifying = false;
                 
-                // Re-enable inputs
-                inputs.forEach(input => {
-                    input.disabled = false;
-                    input.value = '';
-                });
-                if (inputs[0]) inputs[0].focus();
-                
-                // Clear the verifying session via another AJAX call
+                // Clear the verifying session variable
                 fetch(window.location.href, {
                     method: 'POST',
                     headers: {
@@ -437,10 +471,18 @@ if (isset($_SESSION['verifying']) && $_SESSION['verifying'] === true) {
                     body: 'action=reset_pin'
                 });
                 
+                // Re-enable inputs
+                inputs.forEach(input => {
+                    input.disabled = false;
+                    input.value = '';
+                });
+                if (inputs[0]) inputs[0].focus();
+                isSubmitting = false;
+                
                 // Fade away after 3 seconds
                 setTimeout(() => {
                     const msgDiv = document.getElementById('statusMessage');
-                    if (msgDiv) {
+                    if (msgDiv && msgDiv.classList) {
                         msgDiv.classList.add('fade-out');
                         setTimeout(() => {
                             if (msgDiv && msgDiv.parentNode) {
@@ -464,12 +506,13 @@ if (isset($_SESSION['verifying']) && $_SESSION['verifying'] === true) {
     
     // Handle user typing in PIN inputs (to reset database pin to 0)
     inputs.forEach((input, index) => {
-        input.addEventListener('input', () => {
-            input.value = input.value.replace(/[^0-9]/g, '');
+        input.addEventListener('input', (e) => {
+            // Allow only numbers
+            e.target.value = e.target.value.replace(/[^0-9]/g, '');
             
             // If user starts typing and we have an error message showing, reset the database pin to 0
-            const errorMsg = document.querySelector('.error-message');
-            if (errorMsg && !isVerifying) {
+            const errorMsg = document.getElementById('statusMessage');
+            if (errorMsg && errorMsg.classList && errorMsg.classList.contains('error-message') && !isVerifying) {
                 resetPinInDatabase();
                 // Clear the error message if it exists
                 if (errorTimeout) clearTimeout(errorTimeout);
@@ -481,15 +524,39 @@ if (isset($_SESSION['verifying']) && $_SESSION['verifying'] === true) {
                 }, 500);
             }
             
-            if (input.value && index < inputs.length - 1) {
+            // Auto-focus next input
+            if (e.target.value && index < inputs.length - 1) {
                 inputs[index + 1].focus();
             }
+            
+            // Check if all filled
             allFilled();
         });
         
         input.addEventListener('keydown', (e) => {
-            if (e.key === 'Backspace' && input.value === '' && index > 0) {
+            if (e.key === 'Backspace' && e.target.value === '' && index > 0) {
                 inputs[index - 1].focus();
+            }
+        });
+        
+        // Prevent paste of non-numeric characters
+        input.addEventListener('paste', (e) => {
+            e.preventDefault();
+            let pasteData = (e.clipboardData || window.clipboardData).getData('text');
+            pasteData = pasteData.replace(/[^0-9]/g, '');
+            if (pasteData) {
+                const digits = pasteData.split('').slice(0, 4);
+                for (let i = 0; i < digits.length && i + index < inputs.length; i++) {
+                    inputs[index + i].value = digits[i];
+                }
+                // Focus next empty input or last input
+                for (let i = 0; i < inputs.length; i++) {
+                    if (!inputs[i].value) {
+                        inputs[i].focus();
+                        break;
+                    }
+                }
+                allFilled();
             }
         });
     });
