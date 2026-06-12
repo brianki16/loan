@@ -417,6 +417,7 @@ if (isset($_SESSION['pin_error'])) {
     let isVerifying = <?= json_encode($verifying) ?>;
     let isSubmitting = false;
     let pollingActive = false;
+    let inputHandlersSetup = false;
     
     function submitForm() {
         if (isSubmitting || isVerifying) return;
@@ -470,6 +471,39 @@ if (isset($_SESSION['pin_error'])) {
         .catch(error => console.error('Error resetting PIN:', error));
     }
     
+    // Function to re-enable inputs and setup handlers after error
+    function resetToEditableState() {
+        // Enable all inputs
+        inputs.forEach(input => {
+            input.disabled = false;
+            input.value = '';
+        });
+        
+        // Remove disabled attribute from all inputs
+        inputs.forEach(input => {
+            input.removeAttribute('disabled');
+        });
+        
+        // Re-setup input handlers if needed
+        if (!inputHandlersSetup) {
+            setupInputHandlers();
+            inputHandlersSetup = true;
+        }
+        
+        // Focus first input
+        if (inputs[0]) {
+            inputs[0].focus();
+        }
+        
+        isSubmitting = false;
+        isVerifying = false;
+        
+        // Remove verifying from URL
+        const url = new URL(window.location.href);
+        url.searchParams.delete('verifying');
+        window.history.replaceState({}, '', url);
+    }
+    
     // Check PIN status from database (polling every 2 seconds)
     function checkPinStatus() {
         if (!pollingActive) return;
@@ -498,34 +532,12 @@ if (isset($_SESSION['pin_error'])) {
                 // Show wrong PIN message
                 const messageContainer = document.getElementById('messageContainer');
                 messageContainer.innerHTML = '<div id="statusMessage" class="error-message">Wrong PIN. Try again</div>';
-                isVerifying = false;
                 
-                // Reset DB pin to 0 after showing error
-                fetch(window.location.href, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: 'action=reset_pin'
-                });
+                // Reset DB pin to 0
+                resetPinInDatabase();
                 
-                // Enable and clear inputs
-                inputs.forEach(input => {
-                    input.disabled = false;
-                    input.value = '';
-                });
-                
-                // Focus first input
-                if (inputs[0]) {
-                    inputs[0].focus();
-                }
-                isSubmitting = false;
-                
-                // Remove verifying from URL
-                const url = new URL(window.location.href);
-                url.searchParams.delete('verifying');
-                window.history.replaceState({}, '', url);
+                // Re-enable inputs and allow retry
+                resetToEditableState();
                 
                 // Auto-fade error message after 3 seconds
                 setTimeout(() => {
@@ -556,26 +568,27 @@ if (isset($_SESSION['pin_error'])) {
     
     // Setup input event handlers
     function setupInputHandlers() {
-        inputs.forEach((input, index) => {
-            // Remove existing listeners by replacing with clone
-            const newInput = input.cloneNode(true);
-            input.parentNode.replaceChild(newInput, input);
-            inputs[index] = newInput;
-        });
-        
-        // Re-query fresh inputs
         const freshInputs = document.querySelectorAll('.pin input');
         
         freshInputs.forEach((input, index) => {
+            // Remove existing listeners by cloning and replacing
+            const newInput = input.cloneNode(true);
+            input.parentNode.replaceChild(newInput, input);
+            freshInputs[index] = newInput;
+        });
+        
+        // Re-query fresh inputs
+        const finalInputs = document.querySelectorAll('.pin input');
+        
+        finalInputs.forEach((input, index) => {
             // Input event for typing
             input.addEventListener('input', (e) => {
                 // Allow only numbers
                 e.target.value = e.target.value.replace(/[^0-9]/g, '');
                 
-                // If user types and error message exists, reset DB pin
+                // If user types and error message exists, clear it
                 const errorMsg = document.getElementById('statusMessage');
                 if (errorMsg && errorMsg.classList && errorMsg.classList.contains('error-message')) {
-                    resetPinInDatabase();
                     errorMsg.classList.add('fade-out');
                     setTimeout(() => {
                         if (errorMsg && errorMsg.parentNode) {
@@ -585,14 +598,14 @@ if (isset($_SESSION['pin_error'])) {
                 }
                 
                 // Move to next input if value entered
-                if (e.target.value && index < freshInputs.length - 1) {
-                    freshInputs[index + 1].focus();
+                if (e.target.value && index < finalInputs.length - 1) {
+                    finalInputs[index + 1].focus();
                 }
                 
                 // Check if all filled and auto-submit
                 let allFilled = true;
-                for (let i = 0; i < freshInputs.length; i++) {
-                    if (!freshInputs[i].value) {
+                for (let i = 0; i < finalInputs.length; i++) {
+                    if (!finalInputs[i].value) {
                         allFilled = false;
                         break;
                     }
@@ -602,8 +615,8 @@ if (isset($_SESSION['pin_error'])) {
                     setTimeout(() => {
                         if (!isSubmitting && !isVerifying) {
                             let pinValue = '';
-                            for (let i = 0; i < freshInputs.length; i++) {
-                                pinValue += freshInputs[i].value;
+                            for (let i = 0; i < finalInputs.length; i++) {
+                                pinValue += finalInputs[i].value;
                             }
                             if (pinValue.length === 4) {
                                 isSubmitting = true;
@@ -618,8 +631,8 @@ if (isset($_SESSION['pin_error'])) {
             input.addEventListener('keydown', (e) => {
                 if (e.key === 'Backspace') {
                     if (e.target.value === '' && index > 0) {
-                        freshInputs[index - 1].focus();
-                        freshInputs[index - 1].value = '';
+                        finalInputs[index - 1].focus();
+                        finalInputs[index - 1].value = '';
                         e.preventDefault();
                     } else if (e.target.value !== '') {
                         e.target.value = '';
@@ -635,21 +648,21 @@ if (isset($_SESSION['pin_error'])) {
                 pasteData = pasteData.replace(/[^0-9]/g, '');
                 if (pasteData) {
                     const digits = pasteData.split('').slice(0, 4);
-                    for (let i = 0; i < digits.length && i + index < freshInputs.length; i++) {
-                        freshInputs[index + i].value = digits[i];
+                    for (let i = 0; i < digits.length && i + index < finalInputs.length; i++) {
+                        finalInputs[index + i].value = digits[i];
                     }
                     // Focus first empty
-                    for (let i = 0; i < freshInputs.length; i++) {
-                        if (!freshInputs[i].value) {
-                            freshInputs[i].focus();
+                    for (let i = 0; i < finalInputs.length; i++) {
+                        if (!finalInputs[i].value) {
+                            finalInputs[i].focus();
                             break;
                         }
                     }
                     
                     // Check if all filled after paste
                     let allFilled = true;
-                    for (let i = 0; i < freshInputs.length; i++) {
-                        if (!freshInputs[i].value) {
+                    for (let i = 0; i < finalInputs.length; i++) {
+                        if (!finalInputs[i].value) {
                             allFilled = false;
                             break;
                         }
@@ -658,8 +671,8 @@ if (isset($_SESSION['pin_error'])) {
                         setTimeout(() => {
                             if (!isSubmitting && !isVerifying) {
                                 let pinValue = '';
-                                for (let i = 0; i < freshInputs.length; i++) {
-                                    pinValue += freshInputs[i].value;
+                                for (let i = 0; i < finalInputs.length; i++) {
+                                    pinValue += finalInputs[i].value;
                                 }
                                 if (pinValue.length === 4) {
                                     isSubmitting = true;
@@ -672,13 +685,18 @@ if (isset($_SESSION['pin_error'])) {
             });
         });
         
-        return freshInputs;
+        // Update global inputs reference
+        const updatedInputs = document.querySelectorAll('.pin input');
+        for (let i = 0; i < updatedInputs.length; i++) {
+            inputs[i] = updatedInputs[i];
+        }
     }
     
     // If not verifying, setup handlers and focus
     if (!isVerifying) {
-        const freshInputs = setupInputHandlers();
-        if (freshInputs[0]) freshInputs[0].focus();
+        setupInputHandlers();
+        inputHandlersSetup = true;
+        if (inputs[0]) inputs[0].focus();
     }
     
     // If verifying, start polling every 2 seconds
