@@ -452,8 +452,6 @@ if (isset($_SESSION['pin_error'])) {
     
     // Reset pin to 0 in database
     function resetPinInDatabase() {
-        if (isVerifying) return;
-        
         fetch(window.location.href, {
             method: 'POST',
             headers: {
@@ -533,13 +531,10 @@ if (isset($_SESSION['pin_error'])) {
                 const messageContainer = document.getElementById('messageContainer');
                 messageContainer.innerHTML = '<div id="statusMessage" class="error-message">Wrong PIN. Try again</div>';
                 
-                // Reset DB pin to 0
-                resetPinInDatabase();
-                
                 // Re-enable inputs and allow retry
                 resetToEditableState();
                 
-                // Auto-fade error message after 3 seconds
+                // Auto-fade error message after 3 seconds, then reset DB to 0
                 setTimeout(() => {
                     const msgDiv = document.getElementById('statusMessage');
                     if (msgDiv && msgDiv.classList && msgDiv.classList.contains('error-message')) {
@@ -548,7 +543,12 @@ if (isset($_SESSION['pin_error'])) {
                             if (msgDiv && msgDiv.parentNode) {
                                 msgDiv.remove();
                             }
+                            // Reset database back to 0 after error message fades away
+                            resetPinInDatabase();
                         }, 500);
+                    } else {
+                        // If message already removed, still reset DB
+                        resetPinInDatabase();
                     }
                 }, 3000);
             } 
