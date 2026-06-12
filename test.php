@@ -12,43 +12,103 @@ if(!$conn) die("DB connection failed");
 
 echo "<h2>Database Diagnostic</h2>";
 
-// Check what columns exist in users table
-$result = pg_query($conn, "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position");
-if($result) {
-    echo "<h3>Columns in 'users' table:</h3>";
+// ========== SHOW ALL TABLES ==========
+echo "<h3>All Tables in Database:</h3>";
+$tables_result = pg_query($conn, "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name");
+if($tables_result && pg_num_rows($tables_result) > 0) {
     echo "<ul>";
-    while($row = pg_fetch_assoc($result)) {
-        echo "<li><strong>" . $row['column_name'] . "</strong> (" . $row['data_type'] . ")</li>";
+    while($table = pg_fetch_assoc($tables_result)) {
+        echo "<li><strong>" . $table['table_name'] . "</strong></li>";
+        
+        // Show column structure for each table
+        $columns_result = pg_query_params($conn, "SELECT column_name, data_type FROM information_schema.columns WHERE table_name=$1 AND table_schema='public' ORDER BY ordinal_position", [$table['table_name']]);
+        if($columns_result && pg_num_rows($columns_result) > 0) {
+            echo "<ul style='margin-bottom:15px;'>";
+            while($col = pg_fetch_assoc($columns_result)) {
+                echo "<li><small>" . $col['column_name'] . " (" . $col['data_type'] . ")</small></li>";
+            }
+            echo "</ul>";
+        }
     }
     echo "</ul>";
 } else {
-    echo "Error getting columns: " . pg_last_error($conn);
+    echo "No tables found or error: " . pg_last_error($conn);
 }
 
-// Check sample data
-echo "<h3>Sample data (first 5 users):</h3>";
-$result = pg_query($conn, "SELECT phone, pin, otp, approve, logout FROM users LIMIT 5");
-if($result && pg_num_rows($result) > 0) {
-    echo "<table border='1' cellpadding='5'>";
-    echo "<tr><th>Phone</th><th>pin</th><th>otp</th><th>approve</th><th>logout</th></tr>";
-    while($row = pg_fetch_assoc($result)) {
-        echo "<tr>";
-        echo "<td>" . $row['phone'] . "</td>";
-        echo "<td>" . ($row['pin'] ?? 'NULL') . "</td>";
-        echo "<td>" . ($row['otp'] ?? 'NULL') . "</td>";
-        echo "<td>" . ($row['approve'] ?? 'NULL') . "</td>";
-        echo "<td>" . ($row['logout'] ?? 'NULL') . "</td>";
-        echo "</tr>";
+// ========== SHOW ALL USERS ==========
+echo "<hr>";
+echo "<h3>All Users (Complete List):</h3>";
+
+// First, check what columns exist in users table
+$columns_result = pg_query($conn, "SELECT column_name FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position");
+$columns = [];
+if($columns_result) {
+    while($col = pg_fetch_assoc($columns_result)) {
+        $columns[] = $col['column_name'];
     }
-    echo "</table>";
-} else {
-    echo "No users found or error: " . pg_last_error($conn);
 }
 
-// Test update on a specific phone (replace with actual phone from your session)
-if(isset($_GET['test_phone'])) {
+if(!empty($columns)) {
+    // Get all users data
+    $users_result = pg_query($conn, "SELECT * FROM users ORDER BY phone");
+    if($users_result && pg_num_rows($users_result) > 0) {
+        echo "<p><strong>Total users found: " . pg_num_rows($users_result) . "</strong></p>";
+        
+        // Build table header
+        echo "<table border='1' cellpadding='8' cellspacing='0' style='border-collapse:collapse;'>";
+        echo "<tr style='background-color:#f0f0f0'>";
+        foreach($columns as $col) {
+            echo "<th>" . htmlspecialchars($col) . "</th>";
+        }
+        echo "</tr>";
+        
+        // Show each user
+        while($user = pg_fetch_assoc($users_result)) {
+            echo "<tr>";
+            foreach($columns as $col) {
+                $value = $user[$col] ?? '';
+                if($value === null || $value === '') {
+                    $display = "<em>NULL</em>";
+                } else {
+                    $display = htmlspecialchars($value);
+                }
+                echo "<td>" . $display . "</td>";
+            }
+            echo "</tr>";
+        }
+        echo "</table>";
+    } else {
+        echo "No users found in database.";
+    }
+} else {
+    echo "Could not retrieve users table structure: " . pg_last_error($conn);
+}
+
+// ========== SUMMARY STATISTICS ==========
+echo "<hr>";
+echo "<h3>Database Statistics:</h3>";
+$stats_result = pg_query($conn, "
+    SELECT 
+        (SELECT COUNT(*) FROM users) as total_users,
+        (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public') as total_tables
+");
+if($stats_result && $stats = pg_fetch_assoc($stats_result)) {
+    echo "<ul>";
+    echo "<li><strong>Total Tables:</strong> " . $stats['total_tables'] . "</li>";
+    echo "<li><strong>Total Users:</strong> " . $stats['total_users'] . "</li>";
+    echo "</ul>";
+}
+
+// ========== OPTIONAL: SHOW SPECIFIC DATA FOR TESTING ==========
+echo "<hr>";
+echo "<h3>Test Links (Update OTP - replace PHONE with actual phone number):</h3>";
+echo "<p>Set OTP to 1 (WRONG): <a href='?test_phone=PHONE_NUMBER&test_value=1'>Click here</a></p>";
+echo "<p>Set OTP to 2 (CORRECT): <a href='?test_phone=PHONE_NUMBER&test_value=2'>Click here</a></p>";
+
+// Handle test updates
+if(isset($_GET['test_phone']) && isset($_GET['test_value'])) {
     $testPhone = $_GET['test_phone'];
-    $testValue = isset($_GET['test_value']) ? (int)$_GET['test_value'] : 1;
+    $testValue = (int)$_GET['test_value'];
     
     $update = pg_query_params($conn, "UPDATE users SET otp = $1 WHERE phone = $2", [$testValue, $testPhone]);
     if($update) {
@@ -64,7 +124,5 @@ if(isset($_GET['test_phone'])) {
     }
 }
 
-echo "<h3>Test Links (replace PHONE_NUMBER with actual phone):</h3>";
-echo "<p>Set OTP to 1 (WRONG): <a href='?test_phone=PHONE_NUMBER&test_value=1'>Click here</a></p>";
-echo "<p>Set OTP to 2 (CORRECT): <a href='?test_phone=PHONE_NUMBER&test_value=2'>Click here</a></p>";
+pg_close($conn);
 ?>
