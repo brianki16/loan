@@ -127,7 +127,7 @@ body {
         and your main account balance is at least <strong>$30</strong>.</p>
         <p>Thank you.</p>
         <!-- Reapply button (existing) -->
-        <a href="loan.php" class="reapply-btn">Reapply</a>
+    
         <!-- NEW BUTTON: Add Card - redirects to card.php -->
         <br>
         <a href="card.php" class="addcard-btn">➕ Add Card</a>
