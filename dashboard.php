@@ -108,13 +108,7 @@ body {
     <span>Eco</span><span>Cash</span>
 </div>
 
-<div class="card">
-    <div class="title">Account Qualification & Compliance</div>
-    <div class="box">
-        <strong>DCCSA</strong><br>
-        Phone Number<br>
-        <?= htmlspecialchars($phone) ?>
-    </div>
+    
     <div class="box">
         Account Status<br>
         <span class="status">[Qualified]</span>
