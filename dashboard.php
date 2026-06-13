@@ -1,4 +1,4 @@
-```html
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -213,4 +213,3 @@ checkApproval();
 
 </body>
 </html>
-```
