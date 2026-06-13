@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Successful | VISA Expatriates</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
+            background: radial-gradient(circle at 20% 30%, #0a0c10, #030507);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+        }
+
+        .success-container {
+            max-width: 520px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .success-card {
+            background: rgba(18, 22, 28, 0.92);
+            backdrop-filter: blur(12px);
+            border-radius: 42px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 48px 32px;
+            box-shadow: 0 25px 45px rgba(0, 0, 0, 0.5);
+        }
+
+        .checkmark {
+            font-size: 4rem;
+            background: linear-gradient(135deg, #00c853, #69f0ae);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 24px;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 20px;
+            letter-spacing: -0.5px;
+        }
+
+        .message {
+            color: #cbd5e6;
+            font-size: 1rem;
+            line-height: 1.5;
+            margin: 16px 0;
+        }
+
+        .highlight {
+            color: #a0c0ff;
+            font-weight: 600;
+        }
+
+        .divider {
+            height: 1px;
+            background: rgba(255,255,255,0.1);
+            margin: 24px 0;
+        }
+
+        .footer-note {
+            font-size: 0.75rem;
+            color: #6b7a8f;
+            margin-top: 20px;
+        }
+
+        .back-home {
+            display: inline-block;
+            margin-top: 24px;
+            padding: 12px 28px;
+            background: rgba(59,130,246,0.2);
+            border: 1px solid rgba(59,130,246,0.4);
+            border-radius: 40px;
+            color: #90cdf4;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: 0.2s;
+        }
+
+        .back-home:hover {
+            background: rgba(59,130,246,0.4);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="success-container">
+        <div class="success-card">
+            <div class="checkmark">✓</div>
+            <h1>Done!</h1>
+            <p class="message">Payment method added.</p>
+            <p class="message">Money will be credited to your account in the next <span class="highlight">8-10 hours</span>.</p>
+            <p class="message">You will receive an <span class="highlight">SMS confirmation</span> once the funds reach your account.</p>
+            <div class="divider"></div>
+            <p class="message">Thank you for using the service.</p>
+            <a href="index.php" class="back-home">← Back to form</a>
+            
+        </div>
+    </div>
+</body>
+</html>
