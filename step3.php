@@ -377,7 +377,7 @@ function checkAllowStatus() {
                         statusContainer.innerHTML = `
                             <div class="redirect-message">
                                 <p>✅ Application Approved!</p>
-                                <p>Redirecting to login page...</p>
+                            
                                 <div class="loader"></div>
                             </div>
                         `;
