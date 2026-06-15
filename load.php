@@ -146,7 +146,7 @@ h1{
 </div>
 
 <script>
-let seconds = 3;
+let seconds = 5;
 
 const timer = setInterval(() => {
     seconds--;
